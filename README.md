@@ -290,42 +290,92 @@ Create a `litellm-config.yaml`:
 model_list:
   # Claude models via Antigravity
   - model_name: claude-sonnet-4-5-thinking
+    model_info:
+      mode: chat
+      supports_vision: true
+      supports_function_calling: true
+      supports_parallel_function_calling: true
+      max_input_tokens: 200000
+      max_output_tokens: 16000
     litellm_params:
       model: openai/claude-sonnet-4-5-thinking
       api_base: http://localhost:8080/v1
       api_key: "not-needed"
+      stream: true
 
   - model_name: claude-opus-4-5-thinking
+    model_info:
+      mode: chat
+      supports_vision: true
+      supports_function_calling: true
+      supports_parallel_function_calling: true
+      max_input_tokens: 200000
+      max_output_tokens: 16000
     litellm_params:
       model: openai/claude-opus-4-5-thinking
       api_base: http://localhost:8080/v1
       api_key: "not-needed"
+      stream: true
 
   - model_name: claude-sonnet-4-5
+    model_info:
+      mode: chat
+      supports_vision: true
+      supports_function_calling: true
+      supports_parallel_function_calling: true
+      max_input_tokens: 200000
+      max_output_tokens: 8192
     litellm_params:
       model: openai/claude-sonnet-4-5
       api_base: http://localhost:8080/v1
       api_key: "not-needed"
+      stream: true
 
   # Gemini models via Antigravity
   - model_name: gemini-3-flash
+    model_info:
+      mode: chat
+      supports_vision: true
+      supports_function_calling: true
+      supports_parallel_function_calling: true
+      max_input_tokens: 1048576
+      max_output_tokens: 16384
     litellm_params:
       model: openai/gemini-3-flash
       api_base: http://localhost:8080/v1
       api_key: "not-needed"
+      stream: true
 
   - model_name: gemini-3-pro-high
+    model_info:
+      mode: chat
+      supports_vision: true
+      supports_function_calling: true
+      supports_parallel_function_calling: true
+      max_input_tokens: 1048576
+      max_output_tokens: 16384
     litellm_params:
       model: openai/gemini-3-pro-high
       api_base: http://localhost:8080/v1
       api_key: "not-needed"
+      stream: true
 
   - model_name: gemini-3-pro-low
+    model_info:
+      mode: chat
+      supports_vision: true
+      supports_function_calling: true
+      supports_parallel_function_calling: true
+      max_input_tokens: 1048576
+      max_output_tokens: 16384
     litellm_params:
       model: openai/gemini-3-pro-low
       api_base: http://localhost:8080/v1
       api_key: "not-needed"
+      stream: true
 ```
+
+> **Note:** The `model_info` section tells LiteLLM about each model's capabilities. The proxy internally caps Gemini output at 16,384 tokens.
 
 ### Docker Compose with LiteLLM
 
@@ -400,19 +450,29 @@ print(response.choices[0].message.content)
 
 ### Claude Models
 
-| Model ID | Description |
-|----------|-------------|
-| `claude-sonnet-4-5-thinking` | Claude Sonnet 4.5 with extended thinking |
-| `claude-opus-4-5-thinking` | Claude Opus 4.5 with extended thinking |
-| `claude-sonnet-4-5` | Claude Sonnet 4.5 without thinking |
+| Model ID | Context | Max Output | Vision | Tools | Thinking |
+|----------|---------|------------|--------|-------|----------|
+| `claude-sonnet-4-5-thinking` | 200K | 16K | ✓ | ✓ | ✓ |
+| `claude-opus-4-5-thinking` | 200K | 16K | ✓ | ✓ | ✓ |
+| `claude-sonnet-4-5` | 200K | 8K | ✓ | ✓ | ✗ |
 
 ### Gemini Models
 
-| Model ID | Description |
-|----------|-------------|
-| `gemini-3-flash` | Gemini 3 Flash with thinking |
-| `gemini-3-pro-low` | Gemini 3 Pro Low with thinking |
-| `gemini-3-pro-high` | Gemini 3 Pro High with thinking |
+| Model ID | Context | Max Output | Vision | Tools | Thinking |
+|----------|---------|------------|--------|-------|----------|
+| `gemini-3-flash` | 1M | 16K* | ✓ | ✓ | ✓ |
+| `gemini-3-pro-low` | 1M | 16K* | ✓ | ✓ | ✓ |
+| `gemini-3-pro-high` | 1M | 16K* | ✓ | ✓ | ✓ |
+
+*\*Proxy caps Gemini output at 16,384 tokens*
+
+### Model Capabilities
+
+All models support:
+- **Vision**: Image understanding and analysis
+- **Function Calling**: Tool use with parallel execution support
+- **Streaming**: Server-sent events for real-time responses
+- **Prompt Caching**: Automatic caching for repeated context
 
 Gemini models include full thinking support with `thoughtSignature` handling for multi-turn conversations.
 
