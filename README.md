@@ -6,7 +6,7 @@
 
 <a href="https://buymeacoffee.com/badrinarayanans" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
 
-A proxy server that exposes an **Anthropic-compatible API** backed by **Antigravity's Cloud Code**, letting you use Claude and Gemini models with **Claude Code CLI**.
+A proxy server that exposes an **Anthropic-compatible API** backed by **Antigravity's Cloud Code**, letting you use Claude and Gemini models with **Claude Code CLI**, **LiteLLM**, or any Anthropic-compatible client.
 
 ![Antigravity Claude Proxy Banner](images/banner.png)
 
@@ -28,14 +28,61 @@ A proxy server that exposes an **Anthropic-compatible API** backed by **Antigrav
 
 ## Prerequisites
 
-- **Node.js** 18 or later
+- **Node.js** 18 or later (for npm installation)
+- **Docker** (for containerized deployment)
 - **Antigravity** installed (for single-account mode) OR Google account(s) for multi-account mode
 
 ---
 
 ## Installation
 
-### Option 1: npm (Recommended)
+### Option 1: Docker (Recommended for Servers)
+
+Pre-built images are available for `linux/amd64` and `linux/arm64`:
+
+```bash
+docker pull ghcr.io/johnneerdael/antigravity-claude-proxy:latest
+```
+
+Create a `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  antigravity-proxy:
+    image: ghcr.io/johnneerdael/antigravity-claude-proxy:latest
+    container_name: antigravity-proxy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/root/.config/antigravity-proxy
+    environment:
+      - PORT=8080
+      - DEBUG=false
+      - FALLBACK=true
+    restart: unless-stopped
+```
+
+Add accounts and start:
+
+```bash
+# Add Google account (headless mode for servers)
+docker run -it --rm \
+  -v $(pwd)/data:/root/.config/antigravity-proxy \
+  ghcr.io/johnneerdael/antigravity-claude-proxy:latest \
+  node bin/cli.js accounts add --no-browser
+
+# Start the proxy
+docker-compose up -d
+
+# Verify
+curl http://localhost:8080/health
+```
+
+> **Multi-account setup?** See [docs/DOCKER-MULTI-ACCOUNT.md](docs/DOCKER-MULTI-ACCOUNT.md) for production deployment with load balancing, reverse proxy examples, and monitoring.
+
+### Option 2: npm
 
 ```bash
 # Run directly with npx (no install needed)
@@ -46,10 +93,10 @@ npm install -g antigravity-claude-proxy
 antigravity-claude-proxy start
 ```
 
-### Option 2: Clone Repository
+### Option 3: Clone Repository
 
 ```bash
-git clone https://github.com/badri-s2001/antigravity-claude-proxy.git
+git clone https://github.com/johnneerdael/antigravity-claude-proxy.git
 cd antigravity-claude-proxy
 npm install
 npm start
@@ -125,6 +172,9 @@ npx antigravity-claude-proxy start
 
 # If cloned locally
 npm start
+
+# If using Docker
+docker-compose up -d
 ```
 
 The server runs on `http://localhost:8080` by default.
@@ -225,6 +275,124 @@ claude
 ```
 
 > **Note:** If Claude Code asks you to select a login method, add `"hasCompletedOnboarding": true` to `~/.claude.json` (macOS/Linux) or `%USERPROFILE%\.claude.json` (Windows), then restart your terminal and try again.
+
+---
+
+## Using with LiteLLM
+
+You can use this proxy as a backend for [LiteLLM](https://github.com/BerriAI/litellm) to access Antigravity's free Claude and Gemini models from any OpenAI-compatible client.
+
+### LiteLLM Configuration
+
+Create a `litellm-config.yaml`:
+
+```yaml
+model_list:
+  # Claude models via Antigravity
+  - model_name: claude-sonnet-4-5-thinking
+    litellm_params:
+      model: openai/claude-sonnet-4-5-thinking
+      api_base: http://localhost:8080/v1
+      api_key: "not-needed"
+
+  - model_name: claude-opus-4-5-thinking
+    litellm_params:
+      model: openai/claude-opus-4-5-thinking
+      api_base: http://localhost:8080/v1
+      api_key: "not-needed"
+
+  - model_name: claude-sonnet-4-5
+    litellm_params:
+      model: openai/claude-sonnet-4-5
+      api_base: http://localhost:8080/v1
+      api_key: "not-needed"
+
+  # Gemini models via Antigravity
+  - model_name: gemini-3-flash
+    litellm_params:
+      model: openai/gemini-3-flash
+      api_base: http://localhost:8080/v1
+      api_key: "not-needed"
+
+  - model_name: gemini-3-pro-high
+    litellm_params:
+      model: openai/gemini-3-pro-high
+      api_base: http://localhost:8080/v1
+      api_key: "not-needed"
+
+  - model_name: gemini-3-pro-low
+    litellm_params:
+      model: openai/gemini-3-pro-low
+      api_base: http://localhost:8080/v1
+      api_key: "not-needed"
+```
+
+### Docker Compose with LiteLLM
+
+Run both the proxy and LiteLLM together:
+
+```yaml
+version: '3.8'
+
+services:
+  antigravity-proxy:
+    image: ghcr.io/johnneerdael/antigravity-claude-proxy:latest
+    container_name: antigravity-proxy
+    volumes:
+      - ./data:/root/.config/antigravity-proxy
+    environment:
+      - PORT=8080
+    restart: unless-stopped
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    depends_on:
+      - antigravity-proxy
+    environment:
+      - LITELLM_MASTER_KEY=sk-your-master-key
+    restart: unless-stopped
+```
+
+> **Note:** When running in Docker, use `http://antigravity-proxy:8080/v1` as the `api_base` in your LiteLLM config (container name, not localhost).
+
+### Start the Stack
+
+```bash
+# Make sure you have accounts configured in ./data/accounts.json first
+docker-compose up -d
+
+# Test via LiteLLM
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-your-master-key" \
+  -d '{
+    "model": "claude-sonnet-4-5-thinking",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+### Use with OpenAI SDK
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:4000/v1",
+    api_key="sk-your-master-key"
+)
+
+response = client.chat.completions.create(
+    model="claude-sonnet-4-5-thinking",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(response.choices[0].message.content)
+```
 
 ---
 
@@ -339,6 +507,15 @@ antigravity-claude-proxy accounts
 # Choose "Re-authenticate" for the invalid account
 ```
 
+### Docker: Container can't find accounts
+
+Make sure the volume is mounted correctly and `accounts.json` exists:
+```bash
+ls -la ./data/accounts.json
+```
+
+If missing, add accounts first (see Installation section).
+
 ---
 
 ## Safety, Usage, and Risk Notices
@@ -395,9 +572,3 @@ This project is based on insights and code from:
 ## License
 
 MIT
-
----
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=badri-s2001/antigravity-claude-proxy&type=date&legend=top-left&cache-control=no-cache)](https://www.star-history.com/#badri-s2001/antigravity-claude-proxy&type=date&legend=top-left)
