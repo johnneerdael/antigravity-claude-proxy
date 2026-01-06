@@ -6,6 +6,10 @@
 
 **Universal AI Gateway** - Access Claude and Gemini models through any OpenAI or Anthropic-compatible client, powered by Antigravity's Cloud Code.
 
+![banner](https://github.com/user-attachments/assets/1949aefe-6ec8-4930-ad9d-13092ca95ae0)
+
+
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         YOUR AI TOOLS                                   │
