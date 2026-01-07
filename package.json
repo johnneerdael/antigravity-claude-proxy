@@ -1,6 +1,6 @@
 {
   "name": "antigravity-gateway",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Universal AI gateway - access Claude & Gemini models via OpenAI or Anthropic-compatible API through Antigravity Cloud Code",
   "main": "src/index.js",
   "type": "module",
