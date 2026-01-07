@@ -31,7 +31,7 @@
 
 ## Features
 
-- **Dual API Support**: Both OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) endpoints
+- **Triple API Support**: OpenAI Chat Completions (`/v1/chat/completions`), OpenAI Responses (`/v1/responses`), and Anthropic (`/v1/messages`) endpoints
 - **Multiple Models**: Access Claude Sonnet 4.5, Opus 4.5, and Gemini 3 Flash/Pro models
 - **Extended Thinking**: Full support for reasoning/thinking models
 - **Multi-Account Load Balancing**: Add multiple Google accounts for higher throughput
@@ -94,8 +94,9 @@ agw accounts list
 
 ## Client Configuration
 
-The gateway exposes two API endpoints:
-- **OpenAI-compatible**: `http://localhost:8080/v1/chat/completions`
+The gateway exposes three API endpoints:
+- **OpenAI Chat Completions**: `http://localhost:8080/v1/chat/completions`
+- **OpenAI Responses API**: `http://localhost:8080/v1/responses`
 - **Anthropic-compatible**: `http://localhost:8080/v1/messages`
 
 ### Available Models
@@ -293,11 +294,19 @@ client = OpenAI(
     api_key="any-value"
 )
 
+# Chat Completions API
 response = client.chat.completions.create(
     model="gemini-3-flash",
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
+
+# Responses API
+response = client.responses.create(
+    model="gemini-3-flash",
+    input="Tell me a joke about programming."
+)
+print(response.output[0].content[0].text)
 ```
 
 ### OpenAI JavaScript SDK
@@ -338,13 +347,32 @@ print(message.content[0].text)
 ### cURL
 
 ```bash
-# OpenAI format
+# OpenAI Chat Completions format
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer any-value" \
   -d '{
     "model": "gemini-3-flash",
     "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# OpenAI Responses API format
+curl http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer any-value" \
+  -d '{
+    "model": "gemini-3-flash",
+    "input": "Tell me a three sentence bedtime story about a unicorn."
+  }'
+
+# OpenAI Responses API with streaming
+curl http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer any-value" \
+  -d '{
+    "model": "gemini-3-flash",
+    "input": "Write a haiku about coding.",
+    "stream": true
   }'
 
 # Anthropic format
@@ -400,6 +428,7 @@ model_list:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/v1/chat/completions` | POST | OpenAI Chat Completions API |
+| `/v1/responses` | POST | OpenAI Responses API |
 | `/v1/messages` | POST | Anthropic Messages API |
 | `/v1/models` | GET | List available models |
 | `/health` | GET | Health check |

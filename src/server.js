@@ -17,6 +17,13 @@ import {
     convertAnthropicToOpenAI,
     convertAnthropicEventToOpenAI
 } from './format/openai-compat.js';
+import {
+    convertResponsesAPIToAnthropic,
+    convertAnthropicToResponsesAPI,
+    convertAnthropicEventToResponsesAPI,
+    createResponsesStreamState,
+    formatResponsesSSE
+} from './format/openai-responses.js';
 
 // Parse fallback flag directly from command line args to avoid circular dependency
 const args = process.argv.slice(2);
@@ -739,6 +746,90 @@ app.post('/v1/chat/completions', async (req, res) => {
             res.write(`data: ${JSON.stringify({
                 error: { type: errorType, message: errorMessage }
             })}\n\n`);
+            res.end();
+        } else {
+            res.status(statusCode).json({
+                error: {
+                    message: errorMessage,
+                    type: errorType,
+                    code: errorType
+                }
+            });
+        }
+    }
+});
+
+/**
+ * OpenAI Responses API endpoint
+ * POST /v1/responses
+ */
+app.post('/v1/responses', async (req, res) => {
+    try {
+        await ensureInitialized();
+
+        const responsesRequest = req.body;
+        const { model, input, stream } = responsesRequest;
+
+        if (!input) {
+            return res.status(400).json({
+                error: {
+                    message: 'input is required',
+                    type: 'invalid_request_error',
+                    code: 'invalid_input'
+                }
+            });
+        }
+
+        const modelId = model || 'claude-3-5-sonnet-20241022';
+        if (accountManager.isAllRateLimited(modelId)) {
+            logger.warn(`[Server] All accounts rate-limited for ${modelId}. Resetting state for optimistic retry.`);
+            accountManager.resetAllRateLimits();
+        }
+
+        const anthropicRequest = convertResponsesAPIToAnthropic(responsesRequest);
+        logger.info(`[API] Responses API request for model: ${anthropicRequest.model}, stream: ${!!stream}`);
+
+        if (stream) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            res.flushHeaders();
+
+            try {
+                const streamState = createResponsesStreamState();
+                for await (const event of sendMessageStream(anthropicRequest, accountManager, FALLBACK_ENABLED)) {
+                    const responseEvents = convertAnthropicEventToResponsesAPI(event, anthropicRequest.model, streamState, responsesRequest);
+                    for (const responseEvent of responseEvents) {
+                        res.write(formatResponsesSSE(responseEvent));
+                        if (res.flush) res.flush();
+                    }
+                }
+                res.end();
+            } catch (streamError) {
+                logger.error('[API] Responses API stream error:', streamError);
+                const { errorType, errorMessage } = parseError(streamError);
+                res.write(formatResponsesSSE({
+                    type: 'response.failed',
+                    error: { type: errorType, message: errorMessage }
+                }));
+                res.end();
+            }
+        } else {
+            const anthropicResponse = await sendMessage(anthropicRequest, accountManager, FALLBACK_ENABLED);
+            const responsesAPIResponse = convertAnthropicToResponsesAPI(anthropicResponse, anthropicRequest.model, responsesRequest);
+            res.json(responsesAPIResponse);
+        }
+
+    } catch (error) {
+        logger.error('[API] Responses API error:', error);
+        const { errorType, statusCode, errorMessage } = parseError(error);
+
+        if (res.headersSent) {
+            res.write(formatResponsesSSE({
+                type: 'response.failed',
+                error: { type: errorType, message: errorMessage }
+            }));
             res.end();
         } else {
             res.status(statusCode).json({
