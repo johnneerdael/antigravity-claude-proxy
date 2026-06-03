@@ -268,13 +268,19 @@ export function convertAnthropicEventToOpenAI(event, model, state) {
 
     switch (event.type) {
         case 'message_start':
+            state.inputTokens = event.message?.usage?.input_tokens || 0;
             return {
                 ...baseChunk,
                 choices: [{
                     index: 0,
                     delta: { role: 'assistant', content: '' },
                     finish_reason: null
-                }]
+                }],
+                usage: {
+                    prompt_tokens: state.inputTokens,
+                    completion_tokens: 0,
+                    total_tokens: state.inputTokens
+                }
             };
 
         case 'content_block_start':
@@ -355,15 +361,22 @@ export function convertAnthropicEventToOpenAI(event, model, state) {
                     index: 0,
                     delta: {},
                     finish_reason: finishReason
-                }],
-                usage: event.usage ? {
-                    prompt_tokens: 0,
-                    completion_tokens: event.usage.output_tokens || 0,
-                    total_tokens: event.usage.output_tokens || 0
-                } : undefined
+                }]
             };
 
         case 'message_stop':
+            if (event.message?.usage) {
+                state.outputTokens = event.message.usage.output_tokens || 0;
+                return {
+                    ...baseChunk,
+                    choices: [],
+                    usage: {
+                        prompt_tokens: state.inputTokens || 0,
+                        completion_tokens: state.outputTokens,
+                        total_tokens: (state.inputTokens || 0) + state.outputTokens
+                    }
+                };
+            }
             return null;
 
         default:

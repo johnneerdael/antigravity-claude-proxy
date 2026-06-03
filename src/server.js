@@ -659,12 +659,24 @@ app.post('/v1/messages', async (req, res) => {
             res.flushHeaders();
 
             try {
+                let inputTokens = 0;
+                let outputTokens = 0;
                 // Use the streaming generator with account manager
                 for await (const event of sendMessageStream(request, accountManager, FALLBACK_ENABLED)) {
+                    if (event.type === 'message_start' && event.message?.usage) {
+                        inputTokens = event.message.usage.input_tokens || 0;
+                    } else if (event.type === 'message_stop' && event.message?.usage) {
+                        outputTokens = event.message.usage.output_tokens || 0;
+                    }
                     res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
                     // Flush after each event for real-time streaming
                     if (res.flush) res.flush();
                 }
+                
+                if (inputTokens > 0 || outputTokens > 0) {
+                    logger.info(`[API] Stream completed. Tokens - Input: ${inputTokens}, Output: ${outputTokens}, Total: ${inputTokens + outputTokens}`);
+                }
+                
                 res.end();
 
             } catch (streamError) {
@@ -682,6 +694,9 @@ app.post('/v1/messages', async (req, res) => {
         } else {
             // Handle non-streaming response
             const response = await sendMessage(request, accountManager, FALLBACK_ENABLED);
+            if (response.usage) {
+                logger.info(`[API] Request completed. Tokens - Input: ${response.usage.input_tokens}, Output: ${response.usage.output_tokens}, Total: ${(response.usage.input_tokens || 0) + (response.usage.output_tokens || 0)}`);
+            }
             res.json(response);
         }
 
@@ -771,6 +786,11 @@ app.post('/v1/chat/completions', async (req, res) => {
                         if (res.flush) res.flush();
                     }
                 }
+                
+                if (streamState.inputTokens !== undefined && streamState.outputTokens !== undefined) {
+                    logger.info(`[API] Stream completed. Tokens - Input: ${streamState.inputTokens}, Output: ${streamState.outputTokens}, Total: ${streamState.inputTokens + streamState.outputTokens}`);
+                }
+
                 res.write('data: [DONE]\n\n');
                 res.end();
             } catch (streamError) {
@@ -784,6 +804,11 @@ app.post('/v1/chat/completions', async (req, res) => {
         } else {
             const anthropicResponse = await sendMessage(anthropicRequest, accountManager, FALLBACK_ENABLED);
             const openaiResponse = convertAnthropicToOpenAI(anthropicResponse, anthropicRequest.model);
+            
+            if (openaiResponse.usage) {
+                logger.info(`[API] Request completed. Tokens - Input: ${openaiResponse.usage.prompt_tokens}, Output: ${openaiResponse.usage.completion_tokens}, Total: ${openaiResponse.usage.total_tokens}`);
+            }
+            
             res.json(openaiResponse);
         }
 
@@ -854,6 +879,11 @@ app.post('/v1/responses', async (req, res) => {
                         if (res.flush) res.flush();
                     }
                 }
+                
+                if (streamState.inputTokens !== undefined && streamState.outputTokens !== undefined) {
+                    logger.info(`[API] Stream completed. Tokens - Input: ${streamState.inputTokens}, Output: ${streamState.outputTokens}, Total: ${streamState.inputTokens + streamState.outputTokens}`);
+                }
+                
                 res.end();
             } catch (streamError) {
                 logger.error('[API] Responses API stream error:', streamError);
@@ -867,6 +897,11 @@ app.post('/v1/responses', async (req, res) => {
         } else {
             const anthropicResponse = await sendMessage(anthropicRequest, accountManager, FALLBACK_ENABLED);
             const responsesAPIResponse = convertAnthropicToResponsesAPI(anthropicResponse, anthropicRequest.model, responsesRequest);
+            
+            if (responsesAPIResponse.usage) {
+                logger.info(`[API] Request completed. Tokens - Input: ${responsesAPIResponse.usage.input_tokens}, Output: ${responsesAPIResponse.usage.output_tokens}, Total: ${responsesAPIResponse.usage.total_tokens}`);
+            }
+            
             res.json(responsesAPIResponse);
         }
 

@@ -252,6 +252,7 @@ export function convertAnthropicEventToResponsesAPI(event, model, state, origina
 
     switch (event.type) {
         case 'message_start': {
+            state.inputTokens = event.message?.usage?.input_tokens || 0;
             events.push({
                 type: 'response.created',
                 sequence_number: nextSeq(),
@@ -441,6 +442,7 @@ export function convertAnthropicEventToResponsesAPI(event, model, state, origina
                 });
             }
 
+            state.outputTokens = event.message?.usage?.output_tokens || 0;
             events.push({
                 type: 'response.completed',
                 sequence_number: nextSeq(),
@@ -452,9 +454,9 @@ export function convertAnthropicEventToResponsesAPI(event, model, state, origina
                     model,
                     output: [],
                     usage: {
-                        input_tokens: event.message?.usage?.input_tokens || 0,
-                        output_tokens: event.message?.usage?.output_tokens || 0,
-                        total_tokens: (event.message?.usage?.input_tokens || 0) + (event.message?.usage?.output_tokens || 0)
+                        input_tokens: state.inputTokens || 0,
+                        output_tokens: state.outputTokens,
+                        total_tokens: (state.inputTokens || 0) + state.outputTokens
                     }
                 }
             });

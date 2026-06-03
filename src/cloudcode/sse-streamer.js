@@ -284,5 +284,21 @@ export async function* streamSSEResponse(response, originalModel) {
         }
     };
 
-    yield { type: 'message_stop' };
+    yield {
+        type: 'message_stop',
+        message: {
+            id: messageId,
+            type: 'message',
+            role: 'assistant',
+            model: originalModel,
+            stop_reason: stopReason,
+            stop_sequence: null,
+            usage: {
+                input_tokens: inputTokens - cacheReadTokens,
+                output_tokens: outputTokens,
+                cache_read_input_tokens: cacheReadTokens,
+                cache_creation_input_tokens: 0
+            }
+        }
+    };
 }
