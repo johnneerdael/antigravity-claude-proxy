@@ -18,11 +18,8 @@ function showHelp() {
   console.log(`
 antigravity-gateway v${packageJson.version}
 
-Universal AI gateway - access Claude & Gemini via OpenAI or Anthropic-compatible API.
-
 USAGE:
-  antigravity-gateway <command> [options]
-  agw <command> [options]
+  node bin/cli.js <command> [options]
 
 COMMANDS:
   start                 Start the gateway server (default port: 8080)
@@ -38,29 +35,12 @@ OPTIONS:
   --version, -v         Show version number
   --debug               Enable debug logging
   --fallback            Enable model fallback on quota exhaustion
+  --no-browser          Add account without opening browser (manual code entry)
 
 ENVIRONMENT:
   PORT                  Server port (default: 8080)
   DEBUG                 Enable debug mode (true/false)
   FALLBACK              Enable model fallback (true/false)
-
-EXAMPLES:
-  antigravity-gateway start
-  agw start --debug
-  PORT=3000 agw start
-  agw accounts add
-  agw accounts add --no-browser
-
-SUPPORTED CLIENTS:
-  Works with any OpenAI or Anthropic-compatible client:
-  - Cursor, Continue, Cline, Roo Code, Kilo Code
-  - Aider, Cody, Claude Code, Gemini CLI
-  - OpenAI Python/JS SDK, LiteLLM
-  - Cherry Studio, Goose, and more...
-
-QUICK START:
-  Base URL: http://localhost:8080/v1
-  API Key:  any-value (not validated)
 `);
 }
 
@@ -102,7 +82,7 @@ async function main() {
 
     default:
       console.error(`Unknown command: ${command}`);
-      console.error('Run "agw --help" for usage information.');
+      console.error('Run "node bin/cli.js --help" for usage information.');
       process.exit(1);
   }
 }

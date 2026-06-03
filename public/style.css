@@ -1,0 +1,55 @@
+/* Antigravity Gateway UI — custom styles on top of Tailwind */
+
+/* Tab buttons */
+.tab-btn {
+  @apply px-5 py-2.5 rounded-lg text-sm font-semibold text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white transition-all duration-200 mx-1.5 border border-gray-700;
+}
+.tab-btn.active {
+  @apply bg-indigo-600 text-white border-indigo-500 shadow-md;
+}
+
+/* Inputs */
+.input-field {
+  @apply bg-card border border-border rounded-lg px-3 py-2 text-sm text-gray-100
+         focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent;
+}
+
+/* Select specific styling to fix white text on white background in some browsers */
+select.input-field option {
+  @apply bg-card text-gray-100;
+}
+
+/* Buttons */
+.btn-primary {
+  @apply bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg px-4 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
+.btn-secondary {
+  @apply bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg px-4 py-2 transition-colors;
+}
+.btn-danger {
+  @apply bg-red-700 hover:bg-red-600 text-white font-medium rounded-lg px-4 py-2 transition-colors disabled:opacity-50;
+}
+
+/* Cards */
+.card {
+  @apply bg-card border border-border rounded-xl p-5;
+}
+.card-title {
+  @apply text-sm font-semibold text-gray-200 mb-3;
+}
+
+/* Skeleton loader */
+.skeleton {
+  @apply bg-gray-800 animate-pulse;
+}
+
+/* Chat bubbles */
+.bubble-user {
+  @apply self-end bg-indigo-700 text-white rounded-2xl rounded-br-sm px-4 py-2 max-w-[80%] text-sm whitespace-pre-wrap;
+}
+.bubble-assistant {
+  @apply self-start bg-card border border-border text-gray-100 rounded-2xl rounded-bl-sm px-4 py-2 max-w-[80%] text-sm whitespace-pre-wrap;
+}
+.bubble-error {
+  @apply self-start bg-red-900/40 border border-red-700 text-red-300 rounded-xl px-4 py-2 max-w-[80%] text-sm;
+}

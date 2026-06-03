@@ -4,13 +4,8 @@
   "description": "Universal AI gateway - access Claude & Gemini models via OpenAI or Anthropic-compatible API through Antigravity Cloud Code",
   "main": "src/index.js",
   "type": "module",
-  "bin": {
-    "antigravity-gateway": "bin/cli.js",
-    "agw": "bin/cli.js"
-  },
   "files": [
-    "src",
-    "bin"
+    "src"
   ],
   "scripts": {
     "start": "node src/index.js",
@@ -19,16 +14,7 @@
     "accounts:add": "node src/cli/accounts.js add",
     "accounts:list": "node src/cli/accounts.js list",
     "accounts:remove": "node src/cli/accounts.js remove",
-    "accounts:verify": "node src/cli/accounts.js verify",
-    "test": "node tests/run-all.cjs",
-    "test:signatures": "node tests/test-thinking-signatures.cjs",
-    "test:multiturn": "node tests/test-multiturn-thinking-tools.cjs",
-    "test:streaming": "node tests/test-multiturn-thinking-tools-streaming.cjs",
-    "test:interleaved": "node tests/test-interleaved-thinking.cjs",
-    "test:images": "node tests/test-images.cjs",
-    "test:caching": "node tests/test-caching-streaming.cjs",
-    "test:crossmodel": "node tests/test-cross-model-thinking.cjs",
-    "test:oauth": "node tests/test-oauth-no-browser.cjs"
+    "accounts:verify": "node src/cli/accounts.js verify"
   },
   "keywords": [
     "claude",

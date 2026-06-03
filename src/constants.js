@@ -5,6 +5,7 @@
 
 import { homedir, platform, arch } from 'os';
 import { join } from 'path';
+import { generateSmartUserAgent, getClientVersion } from './utils/version-detector.js';
 
 /**
  * Get the Antigravity database path based on the current platform.
@@ -25,18 +26,8 @@ function getAntigravityDbPath() {
     }
 }
 
-/**
- * Generate platform-specific User-Agent string.
- * @returns {string} User-Agent in format "antigravity/version os/arch"
- */
-function getPlatformUserAgent() {
-    const os = platform();
-    const architecture = arch();
-    return `antigravity/1.11.5 ${os}/${architecture}`;
-}
-
 // Cloud Code API endpoints (in fallback order)
-const ANTIGRAVITY_ENDPOINT_DAILY = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
+const ANTIGRAVITY_ENDPOINT_DAILY = 'https://daily-cloudcode-pa.googleapis.com';
 const ANTIGRAVITY_ENDPOINT_PROD = 'https://cloudcode-pa.googleapis.com';
 
 // Endpoint fallback order (daily → prod)
@@ -47,13 +38,11 @@ export const ANTIGRAVITY_ENDPOINT_FALLBACKS = [
 
 // Required headers for Antigravity API requests
 export const ANTIGRAVITY_HEADERS = {
-    'User-Agent': getPlatformUserAgent(),
-    'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
-    'Client-Metadata': JSON.stringify({
-        ideType: 'IDE_UNSPECIFIED',
-        platform: 'PLATFORM_UNSPECIFIED',
-        pluginType: 'GEMINI'
-    })
+    'User-Agent': generateSmartUserAgent(),
+    'Content-Type': 'application/json',
+    'X-Client-Name': 'antigravity',
+    'X-Client-Version': getClientVersion(),
+    'x-goog-api-client': 'gl-node/18.18.2 fire/0.8.6 grpc/1.10.x'
 };
 
 // Default project ID if none can be discovered

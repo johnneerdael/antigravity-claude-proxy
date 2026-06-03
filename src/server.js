@@ -68,6 +68,7 @@ async function ensureInitialized() {
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+app.use(express.static('public'));
 
 /**
  * Parse error message to extract error type, status code, and user-friendly message
@@ -507,6 +508,54 @@ app.get('/v1/models', async (req, res) => {
                 message: error.message
             }
         });
+    }
+});
+
+/**
+ * Test all available models and return the working ones
+ */
+app.get('/v1/real-models', async (req, res) => {
+    try {
+        await ensureInitialized();
+        const account = accountManager.pickNext();
+        if (!account) {
+            return res.status(503).json({ error: 'No accounts available' });
+        }
+        
+        const token = await accountManager.getTokenForAccount(account);
+        const modelsResponse = await listModels(token);
+        const models = modelsResponse.data.map(m => m.id);
+
+        const results = [];
+        const workingModels = [];
+
+        // Test sequentially to avoid rate limits
+        for (const model of models) {
+            try {
+                const request = {
+                    model,
+                    messages: [{ role: 'user', content: 'Reply with just: ok' }],
+                    max_tokens: 20,
+                    stream: false
+                };
+                const response = await sendMessage(request, accountManager, false);
+                const content = response.content?.[0]?.text || '';
+                results.push({ model, status: 'ok', detail: content.trim() });
+                workingModels.push(model);
+            } catch (e) {
+                results.push({ model, status: 'error', detail: e.message });
+            }
+        }
+
+        res.json({
+            total: models.length,
+            workingCount: workingModels.length,
+            workingModels,
+            results
+        });
+    } catch (error) {
+        logger.error('[API] Error testing models:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
