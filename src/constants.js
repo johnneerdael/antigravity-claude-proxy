@@ -84,13 +84,20 @@ export const GEMINI_SKIP_SIGNATURE = 'skip_thought_signature_validator';
 // Cache TTL for Gemini thoughtSignatures (2 hours)
 export const GEMINI_SIGNATURE_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 
+export const MODEL_ALIASES = {};
+
+export function normalizeModelName(modelName) {
+    if (!modelName) return modelName;
+    return MODEL_ALIASES[String(modelName).toLowerCase()] || modelName;
+}
+
 /**
  * Get the model family from model name (dynamic detection, no hardcoded list).
  * @param {string} modelName - The model name from the request
  * @returns {'claude' | 'gemini' | 'unknown'} The model family
  */
 export function getModelFamily(modelName) {
-    const lower = (modelName || '').toLowerCase();
+    const lower = (normalizeModelName(modelName) || '').toLowerCase();
     if (lower.includes('claude')) return 'claude';
     if (lower.includes('gemini')) return 'gemini';
     return 'unknown';
@@ -102,12 +109,13 @@ export function getModelFamily(modelName) {
  * @returns {boolean} True if the model supports thinking blocks
  */
 export function isThinkingModel(modelName) {
-    const lower = (modelName || '').toLowerCase();
+    const lower = (normalizeModelName(modelName) || '').toLowerCase();
     // Claude thinking models have "thinking" in the name
     if (lower.includes('claude') && lower.includes('thinking')) return true;
     // Gemini thinking models: explicit "thinking" in name, OR gemini version 3+
     if (lower.includes('gemini')) {
         if (lower.includes('thinking')) return true;
+        if (lower.includes('agent')) return true;
         // Check for gemini-3 or higher (e.g., gemini-3, gemini-3.5, gemini-4, etc.)
         const versionMatch = lower.match(/gemini-(\d+)/);
         if (versionMatch && parseInt(versionMatch[1], 10) >= 3) return true;
@@ -136,7 +144,9 @@ export const OAUTH_REDIRECT_URI = `http://localhost:${OAUTH_CONFIG.callbackPort}
 // Model fallback mapping - maps primary model to fallback when quota exhausted
 export const MODEL_FALLBACK_MAP = {
     'gemini-3-pro-high': 'claude-opus-4-5-thinking',
+    'gemini-3.1-pro-high': 'claude-opus-4-5-thinking',
     'gemini-3-pro-low': 'claude-sonnet-4-5',
+    'gemini-3.1-pro-low': 'claude-sonnet-4-5',
     'gemini-3-flash': 'claude-sonnet-4-5-thinking',
     'claude-opus-4-5-thinking': 'gemini-3-pro-high',
     'claude-sonnet-4-5-thinking': 'gemini-3-flash',
@@ -161,6 +171,8 @@ export default {
     GEMINI_MAX_OUTPUT_TOKENS,
     GEMINI_SKIP_SIGNATURE,
     GEMINI_SIGNATURE_CACHE_TTL_MS,
+    MODEL_ALIASES,
+    normalizeModelName,
     getModelFamily,
     isThinkingModel,
     OAUTH_CONFIG,

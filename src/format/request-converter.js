@@ -6,7 +6,8 @@
 import {
     GEMINI_MAX_OUTPUT_TOKENS,
     getModelFamily,
-    isThinkingModel
+    isThinkingModel,
+    normalizeModelName
 } from '../constants.js';
 import { convertContentToParts, convertRole } from './content-converter.js';
 import { sanitizeSchema, cleanSchemaForGemini } from './schema-sanitizer.js';
@@ -32,7 +33,7 @@ import { logger } from '../utils/logger.js';
  */
 export function convertAnthropicToGoogle(anthropicRequest) {
     const { messages, system, max_tokens, temperature, top_p, top_k, stop_sequences, tools, tool_choice, thinking } = anthropicRequest;
-    const modelName = anthropicRequest.model || '';
+    const modelName = normalizeModelName(anthropicRequest.model || '');
     const modelFamily = getModelFamily(modelName);
     const isClaudeModel = modelFamily === 'claude';
     const isGeminiModel = modelFamily === 'gemini';
@@ -179,12 +180,26 @@ export function convertAnthropicToGoogle(anthropicRequest) {
             googleRequest.generationConfig.thinkingConfig = thinkingConfig;
         } else if (isGeminiModel) {
             // Gemini thinking config (uses camelCase)
+            let currentMaxTokens = googleRequest.generationConfig.maxOutputTokens || GEMINI_MAX_OUTPUT_TOKENS;
+            const requestedBudget = thinking?.budget_tokens || 16000;
+            
+            if (currentMaxTokens <= requestedBudget) {
+                const adjustedMaxTokens = Math.min(requestedBudget + 8192, GEMINI_MAX_OUTPUT_TOKENS);
+                logger.warn(`[RequestConverter] max_tokens (${currentMaxTokens}) <= thinking_budget (${requestedBudget}). Adjusting to ${adjustedMaxTokens}`);
+                currentMaxTokens = adjustedMaxTokens;
+                googleRequest.generationConfig.maxOutputTokens = currentMaxTokens;
+            }
+
+            const thinkingBudget = Math.max(0, Math.min(requestedBudget, currentMaxTokens - 1));
             const thinkingConfig = {
                 includeThoughts: true,
-                thinkingBudget: thinking?.budget_tokens || 16000
+                thinkingBudget
             };
-            logger.debug(`[RequestConverter] Gemini thinking enabled with budget: ${thinkingConfig.thinkingBudget}`);
-
+            if (thinkingBudget !== requestedBudget) {
+                logger.warn(`[RequestConverter] Gemini thinking budget (${requestedBudget}) exceeds max output tokens (${currentMaxTokens}); using ${thinkingBudget}`);
+            } else {
+                logger.debug(`[RequestConverter] Gemini thinking enabled with budget: ${thinkingConfig.thinkingBudget}`);
+            }
 
             googleRequest.generationConfig.thinkingConfig = thinkingConfig;
         }

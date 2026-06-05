@@ -89,5 +89,11 @@ async function main() {
 
 main().catch((err) => {
   console.error('Error:', err.message);
+  if (args.includes('--debug') || process.env.DEBUG === 'true') {
+    console.error(err.stack || err);
+    if (err.cause) {
+      console.error('Cause:', err.cause.stack || err.cause);
+    }
+  }
   process.exit(1);
 });

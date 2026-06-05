@@ -20,6 +20,7 @@ import { dirname } from 'path';
 import { exec } from 'child_process';
 import net from 'net';
 import { ACCOUNT_CONFIG_PATH, DEFAULT_PORT, MAX_ACCOUNTS } from '../constants.js';
+import { logger } from '../utils/logger.js';
 import {
     getAuthorizationUrl,
     startCallbackServer,
@@ -226,6 +227,10 @@ async function addAccount(existingAccounts) {
         };
     } catch (error) {
         console.error(`\n✗ Authentication failed: ${error.message}`);
+        logger.error('[Accounts] Authentication error details:', error.stack || error);
+        if (error.cause) {
+            logger.error('[Accounts] Authentication error cause:', error.cause.stack || error.cause);
+        }
         return null;
     }
 }
@@ -283,6 +288,10 @@ async function addAccountNoBrowser(existingAccounts, rl) {
         };
     } catch (error) {
         console.error(`\n✗ Authentication failed: ${error.message}`);
+        logger.error('[Accounts] Authentication error details:', error.stack || error);
+        if (error.cause) {
+            logger.error('[Accounts] Authentication error cause:', error.cause.stack || error.cause);
+        }
         return null;
     }
 }
@@ -457,6 +466,8 @@ async function main() {
     const args = process.argv.slice(2);
     const command = args[0] || 'add';
     const noBrowser = args.includes('--no-browser');
+    const debug = args.includes('--debug') || process.env.DEBUG === 'true';
+    logger.setDebug(debug);
 
     console.log('╔════════════════════════════════════════╗');
     console.log('║   Antigravity Proxy Account Manager    ║');
@@ -490,6 +501,7 @@ async function main() {
                 console.log('  node src/cli/accounts.js help    Show this help');
                 console.log('\nOptions:');
                 console.log('  --no-browser    Manual authorization code input (for headless servers)');
+                console.log('  --debug         Show detailed error logs and stack traces');
                 break;
             case 'remove':
                 await ensureServerStopped();

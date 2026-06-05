@@ -4,6 +4,7 @@
  */
 
 import crypto from 'crypto';
+import { isThinkingModel } from '../constants.js';
 
 /**
  * Convert OpenAI Chat Completions request to Anthropic Messages format
@@ -104,10 +105,17 @@ export function convertOpenAIToAnthropic(openaiRequest) {
         anthropicMessages.push(anthropicMsg);
     }
 
+    const isThinking = isThinkingModel(model);
+    
+    let defaultMaxTokens = 4096;
+    if (isThinking) {
+        defaultMaxTokens = 24000;
+    }
+
     const anthropicRequest = {
         model,
         messages: anthropicMessages,
-        max_tokens: max_completion_tokens || max_tokens || 4096,
+        max_tokens: max_completion_tokens || max_tokens || defaultMaxTokens,
         stream: stream || false
     };
 
@@ -147,11 +155,7 @@ export function convertOpenAIToAnthropic(openaiRequest) {
         }
     }
 
-    const modelLower = (model || '').toLowerCase();
-    const isThinkingModel = modelLower.includes('thinking') || 
-        (modelLower.includes('gemini') && /gemini-(\d+)/.test(modelLower) && parseInt(modelLower.match(/gemini-(\d+)/)[1]) >= 3);
-    
-    if (isThinkingModel) {
+    if (isThinking) {
         let budgetTokens = 10000;
         if (reasoning_effort === 'high') {
             budgetTokens = 20000;

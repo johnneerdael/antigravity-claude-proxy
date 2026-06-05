@@ -8,7 +8,8 @@ import crypto from 'crypto';
 import {
     ANTIGRAVITY_HEADERS,
     getModelFamily,
-    isThinkingModel
+    isThinkingModel,
+    normalizeModelName
 } from '../constants.js';
 import { convertAnthropicToGoogle } from '../format/index.js';
 import { deriveSessionId } from './session-manager.js';
@@ -21,7 +22,7 @@ import { deriveSessionId } from './session-manager.js';
  * @returns {Object} The Cloud Code API request payload
  */
 export function buildCloudCodeRequest(anthropicRequest, projectId) {
-    const model = anthropicRequest.model;
+    const model = normalizeModelName(anthropicRequest.model);
     const googleRequest = convertAnthropicToGoogle(anthropicRequest);
 
     // Use stable session ID derived from first user message for cache continuity
@@ -53,10 +54,11 @@ export function buildHeaders(token, model, accept = 'application/json') {
         ...ANTIGRAVITY_HEADERS
     };
 
-    const modelFamily = getModelFamily(model);
+    const normalizedModel = normalizeModelName(model);
+    const modelFamily = getModelFamily(normalizedModel);
 
     // Add interleaved thinking header only for Claude thinking models
-    if (modelFamily === 'claude' && isThinkingModel(model)) {
+    if (modelFamily === 'claude' && isThinkingModel(normalizedModel)) {
         headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
     }
 

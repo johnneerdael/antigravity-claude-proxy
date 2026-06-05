@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { isThinkingModel } from '../constants.js';
 
 export function convertResponsesAPIToAnthropic(responsesRequest) {
     const {
@@ -75,11 +76,9 @@ export function convertResponsesAPIToAnthropic(responsesRequest) {
         }
     }
 
-    const modelLower = (model || '').toLowerCase();
-    const isThinkingModel = modelLower.includes('thinking') ||
-        (modelLower.includes('gemini') && /gemini-(\d+)/.test(modelLower) && parseInt(modelLower.match(/gemini-(\d+)/)[1]) >= 3);
+    const isThinking = isThinkingModel(model);
 
-    if (isThinkingModel || reasoning) {
+    if (isThinking || reasoning) {
         let budgetTokens = 10000;
         if (reasoning?.effort === 'high') budgetTokens = 20000;
         else if (reasoning?.effort === 'low') budgetTokens = 5000;

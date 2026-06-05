@@ -16,6 +16,14 @@ import {
 } from '../constants.js';
 import { logger } from '../utils/logger.js';
 
+function logErrorDetails(context, error) {
+    logger.error(`[OAuth] ${context}: ${error.message}`);
+    logger.error(`[OAuth] ${context} stack:`, error.stack || error);
+    if (error.cause) {
+        logger.error(`[OAuth] ${context} cause:`, error.cause.stack || error.cause);
+    }
+}
+
 /**
  * Generate PKCE code verifier and challenge
  */
@@ -226,20 +234,27 @@ export function startCallbackServer(expectedState, timeoutMs = 120000) {
  * @returns {Promise<{accessToken: string, refreshToken: string, expiresIn: number}>} OAuth tokens
  */
 export async function exchangeCode(code, verifier) {
-    const response = await fetch(OAUTH_CONFIG.tokenUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: new URLSearchParams({
-            client_id: OAUTH_CONFIG.clientId,
-            client_secret: OAUTH_CONFIG.clientSecret,
-            code: code,
-            code_verifier: verifier,
-            grant_type: 'authorization_code',
-            redirect_uri: OAUTH_REDIRECT_URI
-        })
-    });
+    let response;
+    try {
+        logger.debug(`[OAuth] Exchanging authorization code at ${OAUTH_CONFIG.tokenUrl}`);
+        response = await fetch(OAUTH_CONFIG.tokenUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+                client_id: OAUTH_CONFIG.clientId,
+                client_secret: OAUTH_CONFIG.clientSecret,
+                code: code,
+                code_verifier: verifier,
+                grant_type: 'authorization_code',
+                redirect_uri: OAUTH_REDIRECT_URI
+            })
+        });
+    } catch (error) {
+        logErrorDetails(`Token exchange network request failed (${OAUTH_CONFIG.tokenUrl})`, error);
+        throw error;
+    }
 
     if (!response.ok) {
         const error = await response.text();
@@ -270,18 +285,25 @@ export async function exchangeCode(code, verifier) {
  * @returns {Promise<{accessToken: string, expiresIn: number}>} New access token
  */
 export async function refreshAccessToken(refreshToken) {
-    const response = await fetch(OAUTH_CONFIG.tokenUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: new URLSearchParams({
-            client_id: OAUTH_CONFIG.clientId,
-            client_secret: OAUTH_CONFIG.clientSecret,
-            refresh_token: refreshToken,
-            grant_type: 'refresh_token'
-        })
-    });
+    let response;
+    try {
+        logger.debug(`[OAuth] Refreshing access token at ${OAUTH_CONFIG.tokenUrl}`);
+        response = await fetch(OAUTH_CONFIG.tokenUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+                client_id: OAUTH_CONFIG.clientId,
+                client_secret: OAUTH_CONFIG.clientSecret,
+                refresh_token: refreshToken,
+                grant_type: 'refresh_token'
+            })
+        });
+    } catch (error) {
+        logErrorDetails(`Token refresh network request failed (${OAUTH_CONFIG.tokenUrl})`, error);
+        throw error;
+    }
 
     if (!response.ok) {
         const error = await response.text();
@@ -302,11 +324,18 @@ export async function refreshAccessToken(refreshToken) {
  * @returns {Promise<string>} User's email address
  */
 export async function getUserEmail(accessToken) {
-    const response = await fetch(OAUTH_CONFIG.userInfoUrl, {
-        headers: {
-            'Authorization': `Bearer ${accessToken}`
-        }
-    });
+    let response;
+    try {
+        logger.debug(`[OAuth] Fetching user info at ${OAUTH_CONFIG.userInfoUrl}`);
+        response = await fetch(OAUTH_CONFIG.userInfoUrl, {
+            headers: {
+                'Authorization': `Bearer ${accessToken}`
+            }
+        });
+    } catch (error) {
+        logErrorDetails(`User info network request failed (${OAUTH_CONFIG.userInfoUrl})`, error);
+        throw error;
+    }
 
     if (!response.ok) {
         const errorText = await response.text();
@@ -370,12 +399,15 @@ export async function discoverProjectId(accessToken) {
  */
 export async function completeOAuthFlow(code, verifier) {
     // Exchange code for tokens
+    logger.info('[OAuth] Starting token exchange');
     const tokens = await exchangeCode(code, verifier);
 
     // Get user email
+    logger.info('[OAuth] Fetching authenticated user email');
     const email = await getUserEmail(tokens.accessToken);
 
     // Discover project ID
+    logger.info('[OAuth] Discovering project ID');
     const projectId = await discoverProjectId(tokens.accessToken);
 
     return {
