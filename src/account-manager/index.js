@@ -30,6 +30,12 @@ import {
 } from './selection.js';
 import { logger } from '../utils/logger.js';
 
+function hasModelQuota(account, modelId) {
+    if (!modelId || !account?.cachedModelQuotas?.[modelId]) return false;
+    const quota = account.cachedModelQuotas[modelId];
+    return typeof quota.remainingFraction === 'number' && quota.remainingFraction > 0;
+}
+
 export class AccountManager {
     #accounts = [];
     #currentIndex = 0;
@@ -77,6 +83,14 @@ export class AccountManager {
      */
     getAccountCount() {
         return this.#accounts.length;
+    }
+
+    /**
+     * Get the number of accounts eligible for automatic selection.
+     * @returns {number} Number of non-disabled, non-invalid accounts
+     */
+    getEnabledAccountCount() {
+        return this.#accounts.filter(account => !account.isDisabled && !account.isInvalid).length;
     }
 
     /**
@@ -186,6 +200,45 @@ export class AccountManager {
     }
 
     /**
+     * Cache quota API results for an account and clear stale local rate limits
+     * when the quota API says the account has capacity again.
+     * @param {string} email - Email of the account to update
+     * @param {Object} quotas - Map of modelId -> quota info
+     * @returns {boolean} True if any stale rate-limit flag was cleared
+     */
+    updateModelQuotas(email, quotas = {}) {
+        const account = this.#accounts.find(a => a.email === email);
+        if (!account) return false;
+
+        account.cachedModelQuotas = quotas;
+        account.cachedModelQuotasAt = Date.now();
+
+        let cleared = false;
+        if (account.modelRateLimits) {
+            for (const [modelId, limit] of Object.entries(account.modelRateLimits)) {
+                if (limit?.isRateLimited && hasModelQuota(account, modelId)) {
+                    limit.isRateLimited = false;
+                    limit.resetTime = null;
+                    cleared = true;
+                    logger.success(`[AccountManager] Cleared stale rate limit from quota API: ${email} (model: ${modelId})`);
+                }
+            }
+        }
+
+        this.saveToDisk();
+        return cleared;
+    }
+
+    /**
+     * Return accounts whose cached quota API result says the model has capacity.
+     * @param {string} modelId - Model ID to check
+     * @returns {Array<Object>} Accounts with cached positive quota for the model
+     */
+    getAccountsWithCachedQuota(modelId) {
+        return this.#accounts.filter(account => !account.isInvalid && hasModelQuota(account, modelId));
+    }
+
+    /**
      * Mark an account as invalid (credentials need re-authentication)
      * @param {string} email - Email of the account to mark
      * @param {string} reason - Reason for marking as invalid
@@ -193,6 +246,40 @@ export class AccountManager {
     markInvalid(email, reason = 'Unknown error') {
         markAccountInvalid(this.#accounts, email, reason);
         this.saveToDisk();
+    }
+
+    /**
+     * Disable an account from automatic selection.
+     * @param {string} email - Email of the account to disable
+     * @param {string} reason - Reason for disabling
+     * @returns {boolean} True if account was found
+     */
+    disableAccount(email, reason = 'Manually disabled') {
+        const account = this.#accounts.find(a => a.email === email);
+        if (!account) return false;
+        account.isDisabled = true;
+        account.disabledReason = reason;
+        account.disabledAt = Date.now();
+        logger.warn(`[AccountManager] Disabled account: ${email} (${reason})`);
+        this.saveToDisk();
+        return true;
+    }
+
+    /**
+     * Enable a previously disabled account and clear its local rate-limit state.
+     * @param {string} email - Email of the account to enable
+     * @returns {boolean} True if account was found
+     */
+    enableAccount(email) {
+        const account = this.#accounts.find(a => a.email === email);
+        if (!account) return false;
+        account.isDisabled = false;
+        account.disabledReason = null;
+        account.disabledAt = null;
+        account.modelRateLimits = {};
+        logger.success(`[AccountManager] Enabled account: ${email}`);
+        this.saveToDisk();
+        return true;
     }
 
     /**
@@ -260,9 +347,11 @@ export class AccountManager {
     getStatus() {
         const available = this.getAvailableAccounts();
         const invalid = this.getInvalidAccounts();
+        const disabled = this.#accounts.filter(a => a.isDisabled);
 
         // Count accounts that have any active model-specific rate limits
         const rateLimited = this.#accounts.filter(a => {
+            if (a.isDisabled) return false;
             if (!a.modelRateLimits) return false;
             return Object.values(a.modelRateLimits).some(
                 limit => limit.isRateLimited && limit.resetTime > Date.now()
@@ -274,13 +363,19 @@ export class AccountManager {
             available: available.length,
             rateLimited: rateLimited.length,
             invalid: invalid.length,
-            summary: `${this.#accounts.length} total, ${available.length} available, ${rateLimited.length} rate-limited, ${invalid.length} invalid`,
+            disabled: disabled.length,
+            summary: `${this.#accounts.length} total, ${available.length} available, ${rateLimited.length} rate-limited, ${invalid.length} invalid, ${disabled.length} disabled`,
             accounts: this.#accounts.map(a => ({
                 email: a.email,
                 source: a.source,
                 modelRateLimits: a.modelRateLimits || {},
+                cachedModelQuotas: a.cachedModelQuotas || {},
+                cachedModelQuotasAt: a.cachedModelQuotasAt || null,
                 isInvalid: a.isInvalid || false,
                 invalidReason: a.invalidReason || null,
+                isDisabled: a.isDisabled || false,
+                disabledReason: a.disabledReason || null,
+                disabledAt: a.disabledAt || null,
                 lastUsed: a.lastUsed
             }))
         };

@@ -129,6 +129,22 @@ async function loadDashboard() {
   }
 }
 
+async function setAccountEnabled(email, enabled) {
+  const action = enabled ? 'enable' : 'disable';
+  try {
+    const res = await fetch(`${BASE}/accounts/${encodeURIComponent(email)}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: 'Manually disabled from dashboard' })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || `Failed to ${action} account`);
+    await loadDashboard();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
 function renderDashboard(data) {
   const el = document.getElementById('dashboard-content');
   if (!data.accounts || data.accounts.length === 0) {
@@ -140,14 +156,16 @@ function renderDashboard(data) {
 
   // Summary bar
   const availableCount = data.accounts.filter(a => a.status === 'ok').length;
-  const limitedCount = data.accounts.filter(a => a.status !== 'ok' && a.status !== 'invalid').length;
+  const limitedCount = data.accounts.filter(a => a.status !== 'ok' && a.status !== 'invalid' && a.status !== 'disabled').length;
   const invalidCount = data.accounts.filter(a => a.status === 'invalid').length;
+  const disabledCount = data.accounts.filter(a => a.status === 'disabled').length;
 
   let html = `
     <div class="flex gap-4 mb-5 text-sm">
       <span class="px-3 py-1 rounded-full bg-green-900/50 text-green-300">${availableCount} available</span>
       ${limitedCount ? `<span class="px-3 py-1 rounded-full bg-yellow-900/50 text-yellow-300">${limitedCount} rate-limited</span>` : ''}
       ${invalidCount ? `<span class="px-3 py-1 rounded-full bg-red-900/50 text-red-300">${invalidCount} invalid</span>` : ''}
+      ${disabledCount ? `<span class="px-3 py-1 rounded-full bg-gray-800 text-gray-300">${disabledCount} disabled</span>` : ''}
       <span class="px-3 py-1 rounded-full bg-gray-700 text-gray-400">${data.totalAccounts} total</span>
     </div>
   `;
@@ -157,13 +175,20 @@ function renderDashboard(data) {
   for (const acc of data.accounts) {
     const statusColor = acc.status === 'ok'
       ? 'text-green-400' : acc.status === 'invalid'
-      ? 'text-red-400' : 'text-yellow-400';
+      ? 'text-red-400' : acc.status === 'disabled'
+      ? 'text-gray-400' : 'text-yellow-400';
+    const actionButton = acc.status === 'disabled'
+      ? `<button onclick="setAccountEnabled('${acc.email}', true)" class="btn-secondary text-xs">Activate</button>`
+      : `<button onclick="setAccountEnabled('${acc.email}', false)" class="btn-danger text-xs">Disable</button>`;
 
     html += `
       <div class="card">
         <div class="flex items-center justify-between mb-3">
           <span class="text-sm font-medium text-gray-200">${acc.email}</span>
-          <span class="text-xs font-semibold ${statusColor} uppercase">${acc.status}</span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold ${statusColor} uppercase">${acc.status}</span>
+            ${actionButton}
+          </div>
         </div>
     `;
 

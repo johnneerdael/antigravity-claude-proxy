@@ -17,7 +17,7 @@ import { clearExpiredLimits, getAvailableAccounts } from './rate-limits.js';
  * @returns {boolean} True if account is usable
  */
 function isAccountUsable(account, modelId) {
-    if (!account || account.isInvalid) return false;
+    if (!account || account.isInvalid || account.isDisabled) return false;
 
     if (modelId && account.modelRateLimits && account.modelRateLimits[modelId]) {
         const limit = account.modelRateLimits[modelId];
@@ -131,7 +131,7 @@ export function shouldWaitForCurrentAccount(accounts, currentIndex, modelId = nu
     // Get current account directly (activeIndex = current account)
     const account = accounts[index];
 
-    if (!account || account.isInvalid) {
+    if (!account || account.isInvalid || account.isDisabled) {
         return { shouldWait: false, waitMs: 0, account: null };
     }
 

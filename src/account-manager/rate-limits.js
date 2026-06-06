@@ -17,11 +17,11 @@ import { logger } from '../utils/logger.js';
  * @returns {boolean} True if all accounts are rate-limited
  */
 export function isAllRateLimited(accounts, modelId) {
-    if (accounts.length === 0) return true;
+    const enabledAccounts = accounts.filter(acc => !acc.isDisabled && !acc.isInvalid);
+    if (enabledAccounts.length === 0) return true;
     if (!modelId) return false; // No model specified = not rate limited
 
-    return accounts.every(acc => {
-        if (acc.isInvalid) return true; // Invalid accounts count as unavailable
+    return enabledAccounts.every(acc => {
         const modelLimits = acc.modelRateLimits || {};
         const limit = modelLimits[modelId];
         return limit && limit.isRateLimited && limit.resetTime > Date.now();
@@ -37,6 +37,7 @@ export function isAllRateLimited(accounts, modelId) {
  */
 export function getAvailableAccounts(accounts, modelId = null) {
     return accounts.filter(acc => {
+        if (acc.isDisabled) return false;
         if (acc.isInvalid) return false;
 
         if (modelId && acc.modelRateLimits && acc.modelRateLimits[modelId]) {
@@ -125,12 +126,26 @@ export function markRateLimited(accounts, email, resetMs = null, settings = {}, 
 
     account.modelRateLimits[modelId] = {
         isRateLimited: true,
-        resetTime: resetTime
+        resetTime: resetTime,
+        limitedAt: Date.now()
     };
+
+    if (account.cachedModelQuotas && modelId) {
+        account.cachedModelQuotas[modelId] = {
+            remainingFraction: 0,
+            resetTime: new Date(resetTime).toISOString()
+        };
+        account.cachedModelQuotasAt = Date.now();
+    }
+
+    account.isDisabled = true;
+    account.disabledReason = 'quota_exhausted';
+    account.disabledAt = Date.now();
 
     logger.warn(
         `[AccountManager] Rate limited: ${email} (model: ${modelId}). Available in ${formatDuration(cooldownMs)}`
     );
+    logger.warn(`[AccountManager] Auto-disabled account for this runtime: ${email}`);
 
     return true;
 }
@@ -179,6 +194,8 @@ export function getMinWaitTimeMs(accounts, modelId) {
     let soonestAccount = null;
 
     for (const account of accounts) {
+        if (account.isDisabled || account.isInvalid) continue;
+
         if (modelId && account.modelRateLimits && account.modelRateLimits[modelId]) {
             const limit = account.modelRateLimits[modelId];
             if (limit.isRateLimited && limit.resetTime) {

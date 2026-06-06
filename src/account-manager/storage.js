@@ -30,6 +30,10 @@ export async function loadAccounts(configPath = ACCOUNT_CONFIG_PATH) {
             // Reset invalid flag on startup - give accounts a fresh chance to refresh
             isInvalid: false,
             invalidReason: null,
+            // Only preserve manual disables. Quota disables must be re-checked after restart.
+            isDisabled: acc.isDisabled && acc.disabledReason !== 'quota_exhausted',
+            disabledReason: acc.disabledReason === 'quota_exhausted' ? null : (acc.disabledReason || null),
+            disabledAt: acc.disabledReason === 'quota_exhausted' ? null : (acc.disabledAt || null),
             modelRateLimits: acc.modelRateLimits || {}
         }));
 
@@ -114,6 +118,9 @@ export async function saveAccounts(configPath, accounts, settings, activeIndex) 
                 addedAt: acc.addedAt || undefined,
                 isInvalid: acc.isInvalid || false,
                 invalidReason: acc.invalidReason || null,
+                isDisabled: acc.isDisabled || false,
+                disabledReason: acc.disabledReason || null,
+                disabledAt: acc.disabledAt || null,
                 modelRateLimits: acc.modelRateLimits || {},
                 lastUsed: acc.lastUsed
             })),

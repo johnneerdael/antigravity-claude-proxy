@@ -55,9 +55,20 @@ export async function* sendMessageStream(anthropicRequest, accountManager, fallb
 
         // Handle all accounts rate-limited
         if (!account) {
+            if ((accountManager.getEnabledAccountCount?.() ?? accountManager.getAccountCount()) === 0) {
+                throw new Error('No enabled accounts available');
+            }
+
             if (accountManager.isAllRateLimited(model)) {
                 const allWaitMs = accountManager.getMinWaitTimeMs(model);
                 const resetTime = new Date(Date.now() + allWaitMs).toISOString();
+
+                const accountsWithQuota = accountManager.getAccountsWithCachedQuota?.(model) || [];
+                if (accountsWithQuota.length > 0) {
+                    logger.warn(`[CloudCode] Local rate-limit state is stale for ${model}; quota API shows ${accountsWithQuota.length} account(s) with capacity. Retrying stream.`);
+                    accountManager.resetAllRateLimits();
+                    continue;
+                }
 
                 // If wait time is too long (> 2 minutes), throw error immediately
                 if (allWaitMs > MAX_WAIT_BEFORE_ERROR_MS) {
@@ -67,7 +78,7 @@ export async function* sendMessageStream(anthropicRequest, accountManager, fallb
                 }
 
                 // Wait for reset (applies to both single and multi-account modes)
-                const accountCount = accountManager.getAccountCount();
+                const accountCount = accountManager.getEnabledAccountCount?.() ?? accountManager.getAccountCount();
                 logger.warn(`[CloudCode] All ${accountCount} account(s) rate-limited. Waiting ${formatDuration(allWaitMs)}...`);
                 await sleep(allWaitMs);
                 accountManager.clearExpiredLimits();

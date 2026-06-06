@@ -159,6 +159,15 @@ app.get('/health', async (req, res) => {
                     rateLimitCooldownRemaining: soonestReset ? Math.max(0, soonestReset - Date.now()) : 0
                 };
 
+                if (account.isDisabled) {
+                    return {
+                        ...baseInfo,
+                        status: 'disabled',
+                        error: account.disabledReason || 'Disabled',
+                        models: {}
+                    };
+                }
+
                 // Skip invalid accounts for quota check
                 if (account.isInvalid) {
                     return {
@@ -172,6 +181,7 @@ app.get('/health', async (req, res) => {
                 try {
                     const token = await accountManager.getTokenForAccount(account);
                     const quotas = await getModelQuotas(token);
+                    accountManager.updateModelQuotas(account.email, quotas);
 
                     // Format quotas for readability
                     const formattedQuotas = {};
@@ -223,7 +233,8 @@ app.get('/health', async (req, res) => {
                 total: status.total,
                 available: status.available,
                 rateLimited: status.rateLimited,
-                invalid: status.invalid
+                invalid: status.invalid,
+                disabled: status.disabled
             },
             accounts: detailedAccounts
         });
@@ -253,6 +264,15 @@ app.get('/account-limits', async (req, res) => {
         const results = await Promise.allSettled(
             allAccounts.map(async (account) => {
                 // Skip invalid accounts
+                if (account.isDisabled) {
+                    return {
+                        email: account.email,
+                        status: 'disabled',
+                        error: account.disabledReason || 'Disabled',
+                        models: {}
+                    };
+                }
+
                 if (account.isInvalid) {
                     return {
                         email: account.email,
@@ -265,6 +285,7 @@ app.get('/account-limits', async (req, res) => {
                 try {
                     const token = await accountManager.getTokenForAccount(account);
                     const quotas = await getModelQuotas(token);
+                    accountManager.updateModelQuotas(account.email, quotas);
 
                     return {
                         email: account.email,
@@ -337,7 +358,9 @@ app.get('/account-limits', async (req, res) => {
                 // Get status and error from accountLimits
                 const accLimit = accountLimits.find(a => a.email === acc.email);
                 let accStatus;
-                if (acc.isInvalid) {
+                if (acc.isDisabled) {
+                    accStatus = 'disabled';
+                } else if (acc.isInvalid) {
                     accStatus = 'invalid';
                 } else if (accLimit?.status === 'error') {
                     accStatus = 'error';
@@ -453,6 +476,41 @@ app.get('/account-limits', async (req, res) => {
             status: 'error',
             error: error.message
         });
+    }
+});
+
+/**
+ * Manually disable an account from automatic selection.
+ */
+app.post('/accounts/:email/disable', async (req, res) => {
+    try {
+        await ensureInitialized();
+        const email = decodeURIComponent(req.params.email);
+        const reason = req.body?.reason || 'Manually disabled from UI';
+        const ok = accountManager.disableAccount(email, reason);
+        if (!ok) {
+            return res.status(404).json({ status: 'error', error: 'Account not found' });
+        }
+        res.json({ status: 'ok', email, message: 'Account disabled' });
+    } catch (error) {
+        res.status(500).json({ status: 'error', error: error.message });
+    }
+});
+
+/**
+ * Re-enable a disabled account and clear its local rate-limit state.
+ */
+app.post('/accounts/:email/enable', async (req, res) => {
+    try {
+        await ensureInitialized();
+        const email = decodeURIComponent(req.params.email);
+        const ok = accountManager.enableAccount(email);
+        if (!ok) {
+            return res.status(404).json({ status: 'error', error: 'Account not found' });
+        }
+        res.json({ status: 'ok', email, message: 'Account enabled' });
+    } catch (error) {
+        res.status(500).json({ status: 'error', error: error.message });
     }
 });
 
