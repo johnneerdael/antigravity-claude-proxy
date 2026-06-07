@@ -49,7 +49,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "better-sqlite3": "^12.5.0",
     "cors": "^2.8.5",
     "express": "^4.18.2"
   }

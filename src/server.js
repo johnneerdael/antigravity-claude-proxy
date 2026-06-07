@@ -13,8 +13,6 @@ import { REQUEST_BODY_LIMIT } from './constants.js';
 import { AccountManager } from './account-manager/index.js';
 import { formatDuration } from './utils/helpers.js';
 import { logger } from './utils/logger.js';
-import { logCall, getStats, getCalls, getHourlyBreakdown, getDailyBreakdown, getModelBreakdown, getDistinctModels, getDistinctAccounts } from './db/call-logger.js';
-import { configureOptimizer, getOptimizerConfig, loadOptimizerFromDb, optimizeAnthropicRequest, optimizeOpenAIRequest } from './request-optimizer.js';
 import {
     convertOpenAIToAnthropic,
     convertAnthropicToOpenAI,
@@ -31,9 +29,6 @@ import {
 // Parse fallback flag directly from command line args to avoid circular dependency
 const args = process.argv.slice(2);
 const FALLBACK_ENABLED = args.includes('--fallback') || process.env.FALLBACK === 'true';
-
-// Initialize request optimizer — load config from DB (settable via UI)
-loadOptimizerFromDb();
 
 const app = express();
 
@@ -74,7 +69,6 @@ async function ensureInitialized() {
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
-app.use(express.static('public'));
 
 /**
  * Parse error message to extract error type, status code, and user-friendly message
@@ -119,52 +113,6 @@ function parseError(error) {
     }
 
     return { errorType, statusCode, errorMessage };
-}
-
-function stableStringify(value) {
-    if (typeof value === 'string') return value;
-    try { return JSON.stringify(value); } catch (_) { return ''; }
-}
-
-function sha256Short(value) {
-    return createHash('sha256').update(typeof value === 'string' ? value : stableStringify(value)).digest('hex').slice(0, 16);
-}
-
-function makeRequestTrace(beforeValue, afterValue, beforeMessages, afterMessages) {
-    const beforeStr = stableStringify(beforeValue);
-    const afterStr  = stableStringify(afterValue);
-    return {
-        requestHashBeforeOpt: sha256Short(beforeStr),
-        requestHashAfterOpt:  sha256Short(afterStr),
-        optimizerSavedChars: Math.max(0, beforeStr.length - afterStr.length),
-        optimizerSavedMessages: Math.max(0, (beforeMessages || 0) - (afterMessages || 0)),
-    };
-}
-
-function makeResponseTrace(response) {
-    const str = stableStringify(response);
-    return {
-        responseOutputChars: str.length,
-        responseHash: sha256Short(str),
-    };
-}
-
-function createStreamingTrace() {
-    const hash = createHash('sha256');
-    let chars = 0;
-    return {
-        update(chunk) {
-            const str = typeof chunk === 'string' ? chunk : stableStringify(chunk);
-            chars += str.length;
-            hash.update(str);
-        },
-        finish() {
-            return {
-                responseOutputChars: chars,
-                responseHash: hash.digest('hex').slice(0, 16),
-            };
-        }
-    };
 }
 
 // Request logging middleware
@@ -748,24 +696,7 @@ app.post('/v1/messages', async (req, res) => {
             temperature
         };
 
-        // Apply request optimizer
-        const _messagesBeforeOpt = Array.isArray(request.messages) ? request.messages.length : 0;
-        const _requestBeforeOpt = stableStringify(request);
-        optimizeAnthropicRequest(request);
-        const _reqTraceMessages = makeRequestTrace(_requestBeforeOpt, request, _messagesBeforeOpt, Array.isArray(request.messages) ? request.messages.length : 0);
-
         logger.info(`[API] Request for model: ${request.model}, stream: ${!!stream}`);
-        const _startTime_messages = Date.now();
-
-        // Extract request info for trace
-        const msgsAfter  = Array.isArray(request.messages) ? request.messages.length : 0;
-        const toolsAfter = Array.isArray(request.tools)    ? request.tools.length    : 0;
-        const _reqInfo = {
-            sysLen: request.system ? (Array.isArray(request.system) ? request.system.length : 1) : 0,
-            msgs:   msgsAfter,
-            tools:  toolsAfter,
-            chars:  JSON.stringify({ messages: request.messages, system: request.system, tools: request.tools }).length,
-        };
 
         // Debug: Log message structure to diagnose tool_use/tool_result ordering
         if (logger.isDebugEnabled) {
@@ -793,7 +724,6 @@ app.post('/v1/messages', async (req, res) => {
                 let outputTokens = 0;
                 let cacheReadTokens = 0;
                 let cacheCreationTokens = 0;
-                const _streamTraceMessages = createStreamingTrace();
                 // Use the streaming generator with account manager
                 for await (const event of sendMessageStream(request, accountManager, FALLBACK_ENABLED)) {
                     if (event.type === 'message_start' && event.message?.usage) {
@@ -806,7 +736,6 @@ app.post('/v1/messages', async (req, res) => {
                         cacheCreationTokens = event.message.usage.cache_creation_input_tokens || cacheCreationTokens;
                     }
                     const sseChunk = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
-                    _streamTraceMessages.update(sseChunk);
                     res.write(sseChunk);
                     // Flush after each event for real-time streaming
                     if (res.flush) res.flush();
@@ -817,22 +746,12 @@ app.post('/v1/messages', async (req, res) => {
                     const cacheCreate = cacheCreationTokens > 0 ? `, Cache-Write: ${cacheCreationTokens}` : '';
                     logger.info(`[API] Stream completed. Tokens - Input: ${inputTokens}, Output: ${outputTokens}, Total: ${inputTokens + outputTokens}${cacheInfo}${cacheCreate}`);
                 }
-                logCall({ endpoint: '/v1/messages', model: request.model, stream: true,
-                    status: 'success', inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens,
-                    durationMs: Date.now() - _startTime_messages, reqInfo: _reqInfo, optimized: getOptimizerConfig().enabled,
-                    trace: { ..._reqTraceMessages, ..._streamTraceMessages.finish() } });
                 res.end();
 
             } catch (streamError) {
                 logger.error('[API] Stream error:', streamError);
 
                 const { errorType, errorMessage } = parseError(streamError);
-                const _isRateLimit = errorType === 'invalid_request_error' && streamError.message?.includes('RESOURCE_EXHAUSTED');
-                logCall({ endpoint: '/v1/messages', model: request.model, stream: true,
-                    status: _isRateLimit ? 'rate_limited' : 'error',
-                    durationMs: Date.now() - _startTime_messages,
-                    errorType, errorMessage, reqInfo: _reqInfo, optimized: getOptimizerConfig().enabled,
-                    trace: _reqTraceMessages });
 
                 res.write(`event: error\ndata: ${JSON.stringify({
                     type: 'error',
@@ -847,12 +766,6 @@ app.post('/v1/messages', async (req, res) => {
             if (response.usage) {
                 logger.info(`[API] Request completed. Tokens - Input: ${response.usage.input_tokens}, Output: ${response.usage.output_tokens}, Total: ${(response.usage.input_tokens || 0) + (response.usage.output_tokens || 0)}`);
             }
-            logCall({ endpoint: '/v1/messages', model: request.model, stream: false,
-                status: 'success',
-                inputTokens: response.usage?.input_tokens || 0,
-                outputTokens: response.usage?.output_tokens || 0,
-                durationMs: Date.now() - _startTime_messages, reqInfo: _reqInfo, optimized: getOptimizerConfig().enabled,
-                trace: { ..._reqTraceMessages, ...makeResponseTrace(response) } });
             res.json(response);
         }
 
@@ -907,13 +820,6 @@ app.post('/v1/chat/completions', async (req, res) => {
         const openaiRequest = req.body;
         const { model, messages, stream } = openaiRequest;
 
-        const _chatMessagesBeforeOpt = Array.isArray(openaiRequest.messages) ? openaiRequest.messages.length : 0;
-        const _chatRequestBeforeOpt = stableStringify(openaiRequest);
-
-        // Apply request optimizer BEFORE validation (it may modify messages)
-        optimizeOpenAIRequest(openaiRequest);
-        const _reqTraceChat = makeRequestTrace(_chatRequestBeforeOpt, openaiRequest, _chatMessagesBeforeOpt, Array.isArray(openaiRequest.messages) ? openaiRequest.messages.length : 0);
-
         if (!messages || !Array.isArray(messages)) {
             return res.status(400).json({
                 error: {
@@ -932,14 +838,6 @@ app.post('/v1/chat/completions', async (req, res) => {
 
         const anthropicRequest = convertOpenAIToAnthropic(openaiRequest);
         logger.info(`[API] OpenAI-compat request for model: ${anthropicRequest.model}, stream: ${!!stream}`);
-        const _startTime_chat = Date.now();
-        // Extract request info
-        const _reqInfoChat = {
-            sysLen: openaiRequest.system ? (Array.isArray(openaiRequest.system) ? openaiRequest.system.length : 1) : 0,
-            msgs:   Array.isArray(openaiRequest.messages) ? openaiRequest.messages.length : 0,
-            tools:  Array.isArray(openaiRequest.tools)    ? openaiRequest.tools.length    : 0,
-            chars:  JSON.stringify(openaiRequest).length,
-        };
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -950,51 +848,20 @@ app.post('/v1/chat/completions', async (req, res) => {
 
             try {
                 const streamState = {};
-                const _streamTraceChat = createStreamingTrace();
                 for await (const event of sendMessageStream(anthropicRequest, accountManager, FALLBACK_ENABLED)) {
                     const chunk = convertAnthropicEventToOpenAI(event, anthropicRequest.model, streamState);
-                    // Capture cache tokens from raw Anthropic events
-                    if (event.type === 'message_start' && event.message?.usage) {
-                        streamState.cacheReadTokens    = event.message.usage.cache_read_input_tokens || 0;
-                        streamState.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || 0;
-                    } else if (event.type === 'message_stop' && event.message?.usage) {
-                        streamState.cacheReadTokens    = event.message.usage.cache_read_input_tokens || streamState.cacheReadTokens || 0;
-                        streamState.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || streamState.cacheCreationTokens || 0;
-                    }
                     if (chunk) {
                         const sseChunk = `data: ${JSON.stringify(chunk)}\n\n`;
-                        _streamTraceChat.update(sseChunk);
                         res.write(sseChunk);
                         if (res.flush) res.flush();
                     }
                 }
                 
-                if (streamState.inputTokens !== undefined && streamState.outputTokens !== undefined) {
-                    const cacheInfo   = streamState.cacheReadTokens    > 0 ? `, Cache-Read: ${streamState.cacheReadTokens}`    : '';
-                    const cacheCreate = streamState.cacheCreationTokens > 0 ? `, Cache-Write: ${streamState.cacheCreationTokens}` : '';
-                    logger.info(`[API] Stream completed. Tokens - Input: ${streamState.inputTokens}, Output: ${streamState.outputTokens}, Total: ${streamState.inputTokens + streamState.outputTokens}${cacheInfo}${cacheCreate}`);
-                }
-                _streamTraceChat.update('data: [DONE]\n\n');
-                logCall({ endpoint: '/v1/chat/completions', model: anthropicRequest.model, stream: true,
-                    status: 'success',
-                    inputTokens: streamState.inputTokens || 0,
-                    outputTokens: streamState.outputTokens || 0,
-                    cacheReadTokens: streamState.cacheReadTokens || 0,
-                    cacheCreationTokens: streamState.cacheCreationTokens || 0,
-                    durationMs: Date.now() - _startTime_chat, reqInfo: _reqInfoChat, optimized: getOptimizerConfig().enabled,
-                    trace: { ..._reqTraceChat, ..._streamTraceChat.finish() } });
-
                 res.write('data: [DONE]\n\n');
                 res.end();
             } catch (streamError) {
                 logger.error('[API] OpenAI stream error:', streamError);
                 const { errorType, errorMessage } = parseError(streamError);
-                const _isRateLimit2 = errorType === 'invalid_request_error' && streamError.message?.includes('RESOURCE_EXHAUSTED');
-                logCall({ endpoint: '/v1/chat/completions', model: anthropicRequest.model, stream: true,
-                    status: _isRateLimit2 ? 'rate_limited' : 'error',
-                    durationMs: Date.now() - _startTime_chat,
-                    errorType, errorMessage, reqInfo: _reqInfoChat, optimized: getOptimizerConfig().enabled,
-                    trace: _reqTraceChat });
                 res.write(`data: ${JSON.stringify({
                     error: { type: errorType, message: errorMessage }
                 })}\n\n`);
@@ -1007,12 +874,6 @@ app.post('/v1/chat/completions', async (req, res) => {
             if (openaiResponse.usage) {
                 logger.info(`[API] Request completed. Tokens - Input: ${openaiResponse.usage.prompt_tokens}, Output: ${openaiResponse.usage.completion_tokens}, Total: ${openaiResponse.usage.total_tokens}`);
             }
-            logCall({ endpoint: '/v1/chat/completions', model: anthropicRequest.model, stream: false,
-                status: 'success',
-                inputTokens: openaiResponse.usage?.prompt_tokens || 0,
-                outputTokens: openaiResponse.usage?.completion_tokens || 0,
-                durationMs: Date.now() - _startTime_chat, reqInfo: _reqInfoChat, optimized: getOptimizerConfig().enabled,
-                trace: { ..._reqTraceChat, ...makeResponseTrace(openaiResponse) } });
             res.json(openaiResponse);
         }
 
@@ -1064,12 +925,8 @@ app.post('/v1/responses', async (req, res) => {
             accountManager.resetAllRateLimits();
         }
 
-        const _responsesRequestBefore = stableStringify(responsesRequest);
-        const _responsesMessagesBefore = Array.isArray(responsesRequest.input) ? responsesRequest.input.length : 1;
         const anthropicRequest = convertResponsesAPIToAnthropic(responsesRequest);
-        const _reqTraceResponses = makeRequestTrace(_responsesRequestBefore, responsesRequest, _responsesMessagesBefore, Array.isArray(responsesRequest.input) ? responsesRequest.input.length : 1);
         logger.info(`[API] Responses API request for model: ${anthropicRequest.model}, stream: ${!!stream}`);
-        const _startTime_responses = Date.now();
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -1080,48 +937,19 @@ app.post('/v1/responses', async (req, res) => {
 
             try {
                 const streamState = createResponsesStreamState();
-                const _streamTraceResponses = createStreamingTrace();
                 for await (const event of sendMessageStream(anthropicRequest, accountManager, FALLBACK_ENABLED)) {
-                    // Capture cache tokens from raw Anthropic events before conversion
-                    if (event.type === 'message_start' && event.message?.usage) {
-                        streamState.cacheReadTokens    = event.message.usage.cache_read_input_tokens || 0;
-                        streamState.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || 0;
-                    } else if (event.type === 'message_stop' && event.message?.usage) {
-                        streamState.cacheReadTokens    = event.message.usage.cache_read_input_tokens || streamState.cacheReadTokens || 0;
-                        streamState.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || streamState.cacheCreationTokens || 0;
-                    }
                     const responseEvents = convertAnthropicEventToResponsesAPI(event, anthropicRequest.model, streamState, responsesRequest);
                     for (const responseEvent of responseEvents) {
                         const sseChunk = formatResponsesSSE(responseEvent);
-                        _streamTraceResponses.update(sseChunk);
                         res.write(sseChunk);
                         if (res.flush) res.flush();
                     }
                 }
                 
-                if (streamState.inputTokens !== undefined && streamState.outputTokens !== undefined) {
-                    const cacheInfo   = streamState.cacheReadTokens    > 0 ? `, Cache-Read: ${streamState.cacheReadTokens}`    : '';
-                    const cacheCreate = streamState.cacheCreationTokens > 0 ? `, Cache-Write: ${streamState.cacheCreationTokens}` : '';
-                    logger.info(`[API] Stream completed. Tokens - Input: ${streamState.inputTokens}, Output: ${streamState.outputTokens}, Total: ${streamState.inputTokens + streamState.outputTokens}${cacheInfo}${cacheCreate}`);
-                }
-                logCall({ endpoint: '/v1/responses', model: anthropicRequest.model, stream: true,
-                    status: 'success',
-                    inputTokens: streamState.inputTokens || 0,
-                    outputTokens: streamState.outputTokens || 0,
-                    cacheReadTokens: streamState.cacheReadTokens || 0,
-                    cacheCreationTokens: streamState.cacheCreationTokens || 0,
-                    durationMs: Date.now() - _startTime_responses, optimized: getOptimizerConfig().enabled,
-                    trace: { ..._reqTraceResponses, ..._streamTraceResponses.finish() } });
                 res.end();
             } catch (streamError) {
                 logger.error('[API] Responses API stream error:', streamError);
                 const { errorType, errorMessage } = parseError(streamError);
-                const _isRateLimit3 = errorType === 'invalid_request_error' && streamError.message?.includes('RESOURCE_EXHAUSTED');
-                logCall({ endpoint: '/v1/responses', model: anthropicRequest.model, stream: true,
-                    status: _isRateLimit3 ? 'rate_limited' : 'error',
-                    durationMs: Date.now() - _startTime_responses,
-                    errorType, errorMessage, optimized: getOptimizerConfig().enabled,
-                    trace: _reqTraceResponses });
                 res.write(formatResponsesSSE({
                     type: 'response.failed',
                     error: { type: errorType, message: errorMessage }
@@ -1135,12 +963,6 @@ app.post('/v1/responses', async (req, res) => {
             if (responsesAPIResponse.usage) {
                 logger.info(`[API] Request completed. Tokens - Input: ${responsesAPIResponse.usage.input_tokens}, Output: ${responsesAPIResponse.usage.output_tokens}, Total: ${responsesAPIResponse.usage.total_tokens}`);
             }
-            logCall({ endpoint: '/v1/responses', model: anthropicRequest.model, stream: false,
-                status: 'success',
-                inputTokens: responsesAPIResponse.usage?.input_tokens || 0,
-                outputTokens: responsesAPIResponse.usage?.output_tokens || 0,
-                durationMs: Date.now() - _startTime_responses, optimized: getOptimizerConfig().enabled,
-                trace: { ..._reqTraceResponses, ...makeResponseTrace(responsesAPIResponse) } });
             res.json(responsesAPIResponse);
         }
 
@@ -1163,111 +985,6 @@ app.post('/v1/responses', async (req, res) => {
                 }
             });
         }
-    }
-});
-
-// ── Analytics / Logs API ───────────────────────────────────────────────────
-
-/**
- * GET /api/logs/stats?period=today|7d|30d|all
- */
-app.get('/api/logs/stats', (req, res) => {
-    try {
-        const period = ['today', '7d', '30d', 'all'].includes(req.query.period)
-            ? req.query.period : 'today';
-        res.json(getStats(period));
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-/**
- * GET /api/logs/calls?page=1&limit=50&model=&status=&date=&account=
- */
-app.get('/api/logs/calls', (req, res) => {
-    try {
-        const page    = Math.max(1, parseInt(req.query.page)  || 1);
-        const limit   = Math.min(200, parseInt(req.query.limit) || 50);
-        const model   = req.query.model   || undefined;
-        const status  = req.query.status  || undefined;
-        const date    = req.query.date    || undefined;
-        const account = req.query.account || undefined;
-        res.json(getCalls({ page, limit, model, status, date, account }));
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-/**
- * GET /api/logs/breakdown?type=hourly&date=YYYY-MM-DD
- * GET /api/logs/breakdown?type=daily&days=7
- * GET /api/logs/breakdown?type=model&period=7d
- */
-app.get('/api/logs/breakdown', (req, res) => {
-    try {
-        const type = req.query.type;
-        if (type === 'hourly') {
-            res.json(getHourlyBreakdown(req.query.date || undefined));
-        } else if (type === 'daily') {
-            const days = Math.min(90, parseInt(req.query.days) || 7);
-            res.json(getDailyBreakdown(days));
-        } else if (type === 'model') {
-            const period = ['today', '7d', '30d', 'all'].includes(req.query.period)
-                ? req.query.period : '7d';
-            res.json(getModelBreakdown(period));
-        } else {
-            res.status(400).json({ error: 'type must be hourly | daily | model' });
-        }
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-/**
- * GET /api/logs/filters  — distinct values for filter dropdowns
- */
-app.get('/api/logs/filters', (req, res) => {
-    try {
-        res.json({
-            models:   getDistinctModels(),
-            accounts: getDistinctAccounts(),
-            optimizer: getOptimizerConfig(),
-        });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-/**
- * GET /api/logs/optimizer  — current optimizer config
- */
-app.get('/api/logs/optimizer', (req, res) => {
-    try {
-        res.json(getOptimizerConfig());
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-/**
- * POST /api/logs/optimizer  — update optimizer config
- * Body: { enabled, maxMessages, maxToolResults, keepTools, maxSystemChars }
- */
-app.post('/api/logs/optimizer', (req, res) => {
-    try {
-        const current = getOptimizerConfig();
-        const cfg = configureOptimizer({
-            ...current,
-            ...(req.body.enabled        !== undefined ? { enabled:        req.body.enabled }        : {}),
-            ...(req.body.maxMessages    !== undefined ? { maxMessages:    req.body.maxMessages }    : {}),
-            ...(req.body.maxToolResults !== undefined ? { maxToolResults: req.body.maxToolResults } : {}),
-            ...(req.body.keepTools      !== undefined ? { keepTools:      req.body.keepTools }      : {}),
-            ...(req.body.maxSystemChars !== undefined ? { maxSystemChars: req.body.maxSystemChars } : {}),
-        });
-        logger.info('[Optimizer] Config updated:', cfg);
-        res.json({ success: true, config: cfg });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
     }
 });
 
