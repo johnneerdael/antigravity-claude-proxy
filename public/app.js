@@ -43,8 +43,10 @@ async function loadHealth() {
 
         let modelsHtml = '';
         if (acc.models && Object.keys(acc.models).length > 0) {
+          const allowedModels = ['claude-opus-4-6-thinking', 'claude-sonnet-4-6', 'gemini-3.1-pro-low', 'gemini-pro-agent'];
           modelsHtml = `<div class="mt-2 grid grid-cols-2 gap-2 text-xs">`;
           for (const [model, info] of Object.entries(acc.models)) {
+            if (!allowedModels.includes(model)) continue;
             const pct = info.remainingFraction !== null ? Math.round(info.remainingFraction * 100) : 0;
             const color = pct > 20 ? 'bg-green-500' : pct > 0 ? 'bg-yellow-500' : 'bg-red-500';
             modelsHtml += `
