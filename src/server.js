@@ -69,6 +69,7 @@ async function ensureInitialized() {
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+app.use(express.static('public'));
 
 /**
  * Parse error message to extract error type, status code, and user-friendly message
