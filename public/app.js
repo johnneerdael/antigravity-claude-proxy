@@ -4,6 +4,23 @@
    ===================================================== */
 
 const BASE = '';  // Same origin — server serves this file
+const VN_TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+function formatVietnamDateTime(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('vi-VN', {
+    timeZone: VN_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+}
 
 // ── Tab Navigation ─────────────────────────────────────
 
@@ -13,10 +30,10 @@ function showTab(name) {
   document.getElementById(`tab-content-${name}`).classList.remove('hidden');
   document.getElementById(`tab-${name}`).classList.add('active');
 
-  if (name === 'dashboard') { loadDashboard(); renderApiDocs(); }
+  if (name === 'dashboard') { loadDashboard(); loadLogs(); }
   if (name === 'models') {} // user triggers manually
   if (name === 'playground') loadPlaygroundModels();
-  if (name === 'system') { loadHealth(); }
+  if (name === 'system') { loadHealth(); loadOptimizerConfig(); }
 }
 
 // ── Server Status Badge ────────────────────────────────
@@ -120,12 +137,45 @@ function renderApiDocs() {
 async function loadDashboard() {
   const el = document.getElementById('dashboard-content');
   el.innerHTML = `<div class="skeleton h-48 rounded-xl"></div>`;
+  // Also refresh optimizer button
+  updateDashOptBtn();
   try {
-    const res = await fetch(`${BASE}/account-limits`);
+    const res = await fetch(`${BASE}/account-limits?includeDisabledQuota=true`);
     const data = await res.json();
     renderDashboard(data);
   } catch (e) {
     el.innerHTML = `<p class="text-red-400 text-sm">Failed to load: ${e.message}</p>`;
+  }
+}
+
+/** Update the dashboard optimizer toggle button state */
+async function updateDashOptBtn() {
+  const btn = document.getElementById('dash-opt-btn');
+  if (!btn) return;
+  try {
+    const res = await fetch(`${BASE}/api/logs/optimizer`);
+    const cfg = await res.json();
+    btn.textContent = cfg.enabled ? '⚡ Opt: ON' : '⚡ Opt: OFF';
+    btn.className = cfg.enabled
+      ? 'btn-secondary text-sm border-emerald-600/40 text-emerald-400'
+      : 'btn-secondary text-sm border-yellow-600/40 text-yellow-400';
+  } catch (_) { btn.textContent = '⚡ Opt: ?'; }
+}
+
+/** Toggle optimizer from dashboard button */
+async function optimizerToggleFromDash() {
+  try {
+    const res = await fetch(`${BASE}/api/logs/optimizer`);
+    const cfg = await res.json();
+    const enabled = !cfg.enabled;
+    await fetch(`${BASE}/api/logs/optimizer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    updateDashOptBtn();
+  } catch (e) {
+    console.error('Failed to toggle optimizer:', e);
   }
 }
 
@@ -142,6 +192,18 @@ async function setAccountEnabled(email, enabled) {
     await loadDashboard();
   } catch (e) {
     alert(e.message);
+  }
+}
+
+function toggleQuota(email) {
+  const el = document.getElementById(`quota-${email}`);
+  const btn = document.getElementById(`toggle-btn-${email}`);
+  if (el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
+    btn.textContent = '▼ Hide Quota';
+  } else {
+    el.classList.add('hidden');
+    btn.textContent = '▶ Show Quota';
   }
 }
 
@@ -184,7 +246,10 @@ function renderDashboard(data) {
     html += `
       <div class="card">
         <div class="flex items-center justify-between mb-3">
-          <span class="text-sm font-medium text-gray-200">${acc.email}</span>
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-medium text-gray-200">${acc.email}</span>
+            <button id="toggle-btn-${acc.email}" onclick="toggleQuota('${acc.email}')" class="text-xs text-gray-400 hover:text-gray-200 transition-colors">▼ Hide Quota</button>
+          </div>
           <div class="flex items-center gap-2">
             <span class="text-xs font-semibold ${statusColor} uppercase">${acc.status}</span>
             ${actionButton}
@@ -197,7 +262,7 @@ function renderDashboard(data) {
     }
 
     if (models.length > 0 && acc.limits) {
-      html += `<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">`;
+      html += `<div id="quota-${acc.email}" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">`;
       for (const modelId of models) {
         const q = acc.limits[modelId];
         const frac = q?.remainingFraction ?? null;
@@ -208,7 +273,7 @@ function renderDashboard(data) {
           : 'bg-green-500';
         const label = pct === null ? 'N/A' : `${pct}%`;
         const resetStr = q?.resetTime
-          ? `Resets: ${new Date(q.resetTime).toLocaleTimeString()}`
+          ? `Resets: ${formatVietnamDateTime(q.resetTime)} (GMT+7)`
           : '';
 
         html += `
@@ -230,7 +295,7 @@ function renderDashboard(data) {
     html += `</div>`;
   }
   html += `</div>`;
-  html += `<p class="text-gray-600 text-xs mt-4">Last updated: ${new Date(data.timestamp).toLocaleString()}</p>`;
+  html += `<p class="text-gray-600 text-xs mt-4">Last updated: ${formatVietnamDateTime(data.timestamp)} (GMT+7)</p>`;
 
   el.innerHTML = html;
 }
@@ -436,6 +501,53 @@ async function loadHealth() {
   }
 }
 
+async function loadOptimizerConfig() {
+  try {
+    const res = await fetch(`${BASE}/api/logs/optimizer`);
+    const data = await res.json();
+    document.getElementById('opt-toggle').checked       = !!data.enabled;
+    document.getElementById('opt-maxMessages').value    = data.maxMessages ?? 50;
+    document.getElementById('opt-maxToolResults').value = data.maxToolResults ?? 20;
+    document.getElementById('opt-keepTools').checked    = !!data.keepTools;
+    document.getElementById('opt-maxSystemChars').value = data.maxSystemChars ?? 2000;
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function toggleOptimizer() {
+  const enabled = document.getElementById('opt-toggle').checked;
+  await fetch(`${BASE}/api/logs/optimizer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  updateDashOptBtn();
+  showFeedback('opt-feedback', enabled ? '✅ Optimizer enabled' : '⛔ Optimizer disabled');
+}
+
+async function applyOptimizerSetting(key, value) {
+  // First read current config
+  const res = await fetch(`${BASE}/api/logs/optimizer`);
+  const current = await res.json();
+  // Merge & save
+  await fetch(`${BASE}/api/logs/optimizer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...current, [key]: value }),
+  });
+  showFeedback('opt-feedback', `✅ ${key} updated to ${value}`);
+}
+
+function showFeedback(id, msg) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 3000);
+  }
+}
+
 async function refreshTokens() {
   const btn = document.getElementById('refresh-btn');
   const result = document.getElementById('action-result');
@@ -463,7 +575,241 @@ async function refreshTokens() {
 
 // ── Init ───────────────────────────────────────────────
 
+// ── Logs Tab ───────────────────────────────────────────
+
+let _logsPage = 1;
+let _chartHourly = null;
+let _chartDaily = null;
+
 checkServerStatus();
 setInterval(checkServerStatus, 30000);
 loadDashboard();
-renderApiDocs();
+loadLogs();
+
+async function loadLogs() {
+  _logsPage = 1;
+  await Promise.all([loadLogsStats(), loadLogsCharts(), loadLogsFilters(), loadLogsTable()]);
+}
+
+async function loadLogsStats() {
+  const period = document.getElementById('logs-period')?.value || '7d';
+  const el = document.getElementById('logs-stats');
+  try {
+    const data = await fetch(`${BASE}/api/logs/stats?period=${period}`).then(r => r.json());
+    const fmt = n => n == null ? '—' : n.toLocaleString();
+    const fmtMs = ms => ms == null ? '—' : ms >= 1000 ? `${(ms/1000).toFixed(1)}s` : `${ms}ms`;
+    const cacheHit = data.cacheReadTokens || 0;
+    const cacheHitPct = data.totalTokens > 0 ? Math.round((cacheHit / (data.totalTokens + cacheHit)) * 100) : 0;
+    el.innerHTML = `
+      <div class="card text-center">
+        <div class="text-2xl font-bold text-white">${fmt(data.totalCalls)}</div>
+        <div class="text-xs text-gray-400 mt-1">Total Calls</div>
+        <div class="text-xs text-green-400 mt-1">${fmt(data.successCalls)} success</div>
+      </div>
+      <div class="card text-center">
+        <div class="text-2xl font-bold text-white">${fmt(data.totalTokens)}</div>
+        <div class="text-xs text-gray-400 mt-1">Billed Tokens</div>
+        <div class="text-xs text-gray-500 mt-1">${fmt(data.inputTokens)} in / ${fmt(data.outputTokens)} out</div>
+      </div>
+      <div class="card text-center">
+        <div class="text-2xl font-bold text-cyan-400">${fmt(cacheHit)}</div>
+        <div class="text-xs text-gray-400 mt-1">Cache-Read Tokens</div>
+        <div class="text-xs text-cyan-600 mt-1">${cacheHitPct}% of total context${data.cacheCreationTokens > 0 ? ` · ${fmt(data.cacheCreationTokens)} written` : ''}</div>
+      </div>
+      <div class="card text-center">
+        <div class="text-2xl font-bold ${data.successRate >= 90 ? 'text-green-400' : data.successRate >= 70 ? 'text-yellow-400' : 'text-red-400'}">${data.successRate != null ? data.successRate + '%' : '—'}</div>
+        <div class="text-xs text-gray-400 mt-1">Success Rate</div>
+        <div class="text-xs text-gray-500 mt-1">${fmtMs(data.avgDurationMs)} avg · ${fmt(data.rateLimitedCalls)} limited</div>
+      </div>
+    `;
+  } catch (e) {
+    el.innerHTML = `<p class="text-red-400 text-sm col-span-4">Failed: ${e.message}</p>`;
+  }
+}
+
+async function loadLogsCharts() {
+  const period = document.getElementById('logs-period')?.value || '7d';
+  // Use local date (not UTC) to match how call-logger.js stores date
+  const _now = new Date();
+  const today = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
+
+  // Hourly chart (today)
+  try {
+    const hourly = await fetch(`${BASE}/api/logs/breakdown?type=hourly&date=${today}`).then(r => r.json());
+    document.getElementById('logs-chart-date').textContent = `(${today})`;
+    const labels = hourly.map(h => `${String(h.hour).padStart(2,'0')}:00`);
+    const callsData = hourly.map(h => h.calls);
+    const ctx = document.getElementById('chart-hourly').getContext('2d');
+    if (_chartHourly) _chartHourly.destroy();
+    _chartHourly = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Calls',
+          data: callsData,
+          backgroundColor: 'rgba(99,102,241,0.7)',
+          borderRadius: 3,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#9ca3af', font: { size: 10 } }, grid: { color: '#1f2937' } },
+          y: { ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' }, beginAtZero: true }
+        }
+      }
+    });
+  } catch (e) { console.error('Hourly chart error:', e); }
+
+  // Daily chart
+  try {
+    const daily = await fetch(`${BASE}/api/logs/breakdown?type=daily&days=7`).then(r => r.json());
+    const ctx2 = document.getElementById('chart-daily').getContext('2d');
+    if (_chartDaily) _chartDaily.destroy();
+    _chartDaily = new Chart(ctx2, {
+      type: 'bar',
+      data: {
+        labels: daily.map(d => d.date.slice(5)),  // "MM-DD"
+        datasets: [
+          { label: 'Success', data: daily.map(d => d.success), backgroundColor: 'rgba(34,197,94,0.7)', borderRadius: 3 },
+          { label: 'Error',   data: daily.map(d => d.error),   backgroundColor: 'rgba(239,68,68,0.7)',  borderRadius: 3 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#9ca3af', boxWidth: 12 } } },
+        scales: {
+          x: { stacked: true, ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' } },
+          y: { stacked: true, ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' }, beginAtZero: true }
+        }
+      }
+    });
+  } catch (e) { console.error('Daily chart error:', e); }
+
+  // Model breakdown
+  try {
+    const models = await fetch(`${BASE}/api/logs/breakdown?type=model&period=${period}`).then(r => r.json());
+    const el = document.getElementById('logs-model-breakdown');
+    if (!models.length) { el.innerHTML = '<p class="text-gray-500">No data yet.</p>'; return; }
+    const maxTok = Math.max(...models.map(m => m.total_tokens || 0), 1);
+    el.innerHTML = models.map(m => {
+      const pct = Math.round(((m.total_tokens || 0) / maxTok) * 100);
+      const avgMs = m.avg_duration_ms ? Math.round(m.avg_duration_ms) : null;
+      const cacheRead = m.cache_read_tokens || 0;
+      const cacheCreate = m.cache_creation_tokens || 0;
+      const cacheStr = cacheRead > 0 ? ` · 💾 ${cacheRead.toLocaleString()} cached` : '';
+      const cacheCreateStr = cacheCreate > 0 ? ` · ✍ ${cacheCreate.toLocaleString()} written` : '';
+      return `
+        <div class="mb-3">
+          <div class="flex justify-between text-xs mb-1">
+            <span class="font-mono text-gray-200">${m.model}</span>
+            <span class="text-gray-400">${(m.total_tokens||0).toLocaleString()} billed &nbsp;·&nbsp; ${m.calls} calls${avgMs ? ` &nbsp;·&nbsp; avg ${avgMs}ms` : ''}${cacheStr}${cacheCreateStr}</span>
+          </div>
+          <div class="bg-gray-700 rounded-full h-2">
+            <div class="bg-indigo-500 h-2 rounded-full" style="width:${pct}%"></div>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) { console.error('Model breakdown error:', e); }
+}
+
+async function loadLogsFilters() {
+  try {
+    const data = await fetch(`${BASE}/api/logs/filters`).then(r => r.json());
+    const sel = document.getElementById('logs-model');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All Models</option>' +
+      data.models.map(m => `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`).join('');
+  } catch (e) { /* ignore */ }
+}
+
+async function loadLogsTable() {
+  const period  = document.getElementById('logs-period')?.value || '7d';
+  const model   = document.getElementById('logs-model')?.value  || '';
+  const status  = document.getElementById('logs-status')?.value || '';
+  const date    = document.getElementById('logs-date')?.value   || '';
+  const tbody   = document.getElementById('logs-table-body');
+  const pgEl    = document.getElementById('logs-pagination');
+  tbody.innerHTML = `<tr><td colspan="11" class="py-4 text-gray-500">Loading...</td></tr>`;
+
+  try {
+    const params = new URLSearchParams({ page: _logsPage, limit: 50 });
+    if (model)  params.set('model',  model);
+    if (status) params.set('status', status);
+    if (date)   params.set('date',   date);
+
+    const data = await fetch(`${BASE}/api/logs/calls?${params}`).then(r => r.json());
+
+    if (!data.rows.length) {
+      tbody.innerHTML = `<tr><td colspan="11" class="py-4 text-gray-500">No calls recorded yet.</td></tr>`;
+      pgEl.innerHTML = '';
+      return;
+    }
+
+    const statusBadge = s => {
+      if (s === 'success')      return '<span class="text-green-400">✓</span>';
+      if (s === 'rate_limited') return '<span class="text-yellow-400">⏳</span>';
+      return '<span class="text-red-400">✗</span>';
+    };
+    const shortEndpoint = e => e.replace('/v1/', '');
+    const fmtTime = ts => {
+      const d = new Date(ts);
+      return `<span title="${ts}">${d.toLocaleDateString()} ${d.toLocaleTimeString()}</span>`;
+    };
+    // Opt badge
+    const optBadge = opt => opt
+      ? '<span class="text-yellow-400 text-xs font-bold" title="Request optimizer was enabled for this call">⚡</span>'
+      : '<span class="text-gray-700">—</span>';
+
+    tbody.innerHTML = data.rows.map(r => {
+      const cacheRead = r.cache_read_tokens || 0;
+      const cacheCreate = r.cache_creation_tokens || 0;
+      const cacheCell = cacheRead > 0
+        ? `<span class="text-cyan-400">${cacheRead.toLocaleString()}</span>${cacheCreate > 0 ? `<span class="text-gray-600"> +${cacheCreate.toLocaleString()}</span>` : ''}`
+        : `<span class="text-gray-600">—</span>`;
+      // Request info tooltip
+      const reqSys  = r.request_system_len;
+      const reqMsgs = r.request_messages;
+      const reqTols = r.request_tools;
+      const reqChar = r.request_chars;
+      const reqTip  = (reqMsgs != null)
+        ? `title="System: ${reqSys ?? '?'} · Messages: ${reqMsgs} · Tools: ${reqTols ?? 0} · ${(reqChar ?? 0).toLocaleString()} chars"`
+        : '';
+      const reqCell = (reqMsgs != null)
+        ? `<span class="text-gray-500 cursor-help border-b border-dotted border-gray-700 text-xs" ${reqTip}>📋 ${reqMsgs}msgs</span>`
+        : `<span class="text-gray-700">—</span>`;
+      return `
+      <tr class="border-t border-border hover:bg-gray-800/40 text-xs">
+        <td class="py-2 pr-4 text-gray-400">${fmtTime(r.timestamp)}</td>
+        <td class="py-2 pr-4 font-mono text-gray-300">${shortEndpoint(r.endpoint)}</td>
+        <td class="py-2 pr-4 font-mono text-gray-200 max-w-[140px] truncate" title="${r.model}">${r.model}</td>
+        <td class="py-2 pr-4">${statusBadge(r.status)} <span class="text-gray-500">${r.status}</span></td>
+        <td class="py-2 pr-4 text-gray-300">${(r.input_tokens||0).toLocaleString()}</td>
+        <td class="py-2 pr-4 text-gray-300">${(r.output_tokens||0).toLocaleString()}</td>
+        <td class="py-2 pr-4">${cacheCell}</td>
+        <td class="py-2 pr-4">${reqCell}</td>
+        <td class="py-2 pr-4">${optBadge(r.optimized)}</td>
+        <td class="py-2 pr-4 text-gray-400">${r.duration_ms != null ? r.duration_ms + 'ms' : '—'}</td>
+        <td class="py-2 text-gray-500">${r.stream ? 'stream' : 'sync'}</td>
+      </tr>`;
+    }).join('');
+
+    // Pagination
+    pgEl.innerHTML = `
+      <span>Page ${data.page} / ${data.totalPages} &nbsp;·&nbsp; ${data.total.toLocaleString()} total</span>
+      <div class="flex gap-2">
+        <button onclick="logsPageNav(-1)" class="btn-secondary text-xs px-3 py-1" ${data.page <= 1 ? 'disabled' : ''}>← Prev</button>
+        <button onclick="logsPageNav(1)"  class="btn-secondary text-xs px-3 py-1" ${data.page >= data.totalPages ? 'disabled' : ''}>Next →</button>
+      </div>
+    `;
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="11" class="py-4 text-red-400">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function logsPageNav(delta) {
+  _logsPage = Math.max(1, _logsPage + delta);
+  loadLogsTable();
+}
