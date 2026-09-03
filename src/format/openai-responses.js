@@ -242,7 +242,8 @@ export function createResponsesStreamState() {
         currentBlockType: null,
         currentFunctionCall: null,
         messageItemId: null,
-        hasEmittedMessageItem: false
+        hasEmittedMessageItem: false,
+        messageText: ''
     };
 }
 
@@ -356,6 +357,8 @@ export function convertAnthropicEventToResponsesAPI(event, model, state, origina
 
         case 'content_block_delta': {
             if (event.delta?.type === 'text_delta') {
+                state.messageText += event.delta.text || '';
+
                 events.push({
                     type: 'response.output_text.delta',
                     sequence_number: nextSeq(),
@@ -392,7 +395,7 @@ export function convertAnthropicEventToResponsesAPI(event, model, state, origina
                     item_id: state.messageItemId,
                     output_index: state.currentItemIndex,
                     content_index: state.currentContentIndex,
-                    text: ''
+                    text: state.messageText
                 });
             } else if (state.currentBlockType === 'tool_use' && state.currentFunctionCall) {
                 events.push({
@@ -436,7 +439,13 @@ export function convertAnthropicEventToResponsesAPI(event, model, state, origina
                         id: state.messageItemId,
                         status: 'completed',
                         role: 'assistant',
-                        content: []
+                        content: [
+                            {
+                                type: 'output_text',
+                                text: state.messageText,
+                                annotations: []
+                            }
+                        ]
                     }
                 });
             }
@@ -450,7 +459,19 @@ export function convertAnthropicEventToResponsesAPI(event, model, state, origina
                     created_at: state.createdAt,
                     status: 'completed',
                     model,
-                    output: [],
+                    output: state.hasEmittedMessageItem
+                    ? [{
+                        type: 'message',
+                        id: state.messageItemId,
+                        status: 'completed',
+                        role: 'assistant',
+                        content: [{
+                            type: 'output_text',
+                            text: state.messageText,
+                            annotations: []
+                        }]
+                    }]
+                    : [],
                     usage: {
                         input_tokens: event.message?.usage?.input_tokens || 0,
                         output_tokens: event.message?.usage?.output_tokens || 0,
